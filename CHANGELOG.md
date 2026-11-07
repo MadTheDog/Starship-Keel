@@ -1,5 +1,13 @@
 # Starship Keel changelog
 
+## Unreleased
+
+- Added mod-owned solid colors and albedo textures for custom attachment visuals, with optional colored glow and per-material stock paint.
+- Added independent native placement and item-preview paint defaults for accepted custom visuals. Saved bricks retain their player-applied colors.
+- Added custom receiver host meshes and separately identified repeat meshes. The opt-in modular layout renders one full section at each native repeat position while preserving stock collision, resize rules, and attachment sockets.
+- Modular receivers retain the saved IDs of older stock repeat records and use a renderer-only substitution for their section geometry. Rejected section meshes fall back to stock visuals under the same registered IDs.
+- Verified single and stretched placements, section culling, saved paint, repeat reconstruction, and stock fallback in the solo lab on Steam build 26451593 / 26w45a.
+
 ## [0.1.4](https://github.com/MadTheDog/Starship-Keel/releases/tag/v0.1.4)
 
 - Added generic receiver and addon registration for native weapon side slots on vertically stretched stock templates. Mods declare compatible addon keys and read live slot snapshots with the installed attachment's key and placement.
