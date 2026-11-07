@@ -9,6 +9,25 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
+    internal sealed class PreparedAttachmentVisual
+    {
+        internal PreparedAttachmentVisual(Mesh mesh,WeaponAttachmentVisual? paintSource,Bounds? renderEnvelope)
+        {
+            Mesh = mesh;
+            DefaultPaint = paintSource?.DefaultPaint;
+            PreviewPaint = paintSource?.PreviewPaint;
+            PaintRequiresCustomPalette = paintSource?.Materials != null;
+            RenderEnvelope=renderEnvelope;
+        }
+
+        internal Mesh Mesh { get; set; }
+        internal VoxelMaterial[]? Palette { get; set; }
+        internal Color32? DefaultPaint { get; }
+        internal Color32? PreviewPaint { get; }
+        internal bool PaintRequiresCustomPalette { get; }
+        internal Bounds? RenderEnvelope { get; }
+    }
+
     internal static class AttachmentVisualResources
     {
         private const int MaxVertices = 4096;
@@ -17,7 +36,7 @@ namespace Sevo.Framework.Runtime
         [ThreadStatic] private static Binding? active;
         private static FieldInfo? colliderMesh;
 
-        internal static Mesh Prepare(WeaponAttachmentVisual visual, Brick template, string key)
+        internal static Mesh Prepare(WeaponAttachmentVisual visual,Brick template,string key,bool useCustomPalette=false,Bounds? renderEnvelope=null)
         {
             var mesh = visual.Mesh;
             if (mesh == null || !mesh.isReadable || mesh.vertexCount is < 3 or > MaxVertices || mesh.subMeshCount != 1
@@ -38,8 +57,10 @@ namespace Sevo.Framework.Runtime
                 throw new InvalidOperationException("Mesh channels or per-triangle material slots are incomplete.");
 
             var bounds = template.VoxelMesh.Mesh.bounds;
-            var toleratedBounds = bounds;
-            toleratedBounds.Expand(0.0002f);
+            // Section inputs are centered in authoring space. The envelope is in native render space.
+            var renderOffset = renderEnvelope?.center ?? Vector3.zero;
+            var toleratedBounds = renderEnvelope is { } bay ? new Bounds(Vector3.zero,bay.size) : bounds;
+            if(renderEnvelope==null) toleratedBounds.Expand(0.0002f);
             for (int index = 0; index < positions.Length; index++)
             {
                 var tangent = tangents[index];
@@ -49,11 +70,25 @@ namespace Sevo.Framework.Runtime
                     || !UnitLength(tangent.x*tangent.x+tangent.y*tangent.y+tangent.z*tangent.z)
                     || tangent.w != -1f && tangent.w != 1f || !NormalizedUv(uv[index])
                     || uv2.Length != 0 && (!Finite(uv2[index].x) || !Finite(uv2[index].y)))
-                    throw new InvalidOperationException("A vertex has invalid channels or exceeds the stock render envelope.");
+                    throw new InvalidOperationException("A vertex has invalid channels or exceeds the permitted render envelope.");
             }
 
             var materials = template.VoxelMaterials;
             var baked = VoxelMaterialResources.materialParamDatas;
+            int[]? fallbackSlots = null;
+            if (visual.Materials is { } palette)
+            {
+                if (palette.Count is < 1 or > AttachmentMaterialResources.MaxPaletteSize)
+                    throw new InvalidOperationException("The custom material palette is empty or exceeds the per-visual limit.");
+                fallbackSlots = new int[palette.Count];
+                for (int index = 0; index < palette.Count; index++)
+                {
+                    int slot = palette[index]?.FallbackMaterialSlot ?? -1;
+                    if ((uint)slot >= materials.Length || !IsStaticOpaque(materials[slot],baked))
+                        throw new InvalidOperationException("A custom material does not declare a supported baked fallback slot.");
+                    fallbackSlots[index] = slot;
+                }
+            }
             for (int triangle = 0; triangle < slots.Count; triangle++)
             {
                 int start = triangle * 3;
@@ -62,7 +97,8 @@ namespace Sevo.Framework.Runtime
                     || Vector3.Cross(positions[b]-positions[a],positions[c]-positions[a]).sqrMagnitude <= 1e-16f)
                     throw new InvalidOperationException("A triangle has invalid indices or zero area.");
                 int slot = slots[triangle];
-                if ((uint)slot >= materials.Length || !IsStaticOpaque(materials[slot],baked))
+                if (fallbackSlots!=null ? (uint)slot >= fallbackSlots.Length
+                    : (uint)slot >= materials.Length || !IsStaticOpaque(materials[slot],baked))
                     throw new InvalidOperationException("A triangle requests an unavailable or unsupported baked opaque material slot.");
             }
 
@@ -77,11 +113,12 @@ namespace Sevo.Framework.Runtime
             {
                 int index = indices[corner];
                 int slot = slots[corner/3];
+                if (fallbackSlots!=null && !useCustomPalette) slot = fallbackSlots[slot];
                 if (!verticesBySlot.TryGetValue((index,slot),out int encoded))
                 {
                     encoded = vertices.Count;
                     verticesBySlot.Add((index,slot),encoded);
-                    vertices.Add(positions[index]);
+                    vertices.Add(positions[index]+renderOffset);
                     newNormals.Add(normals[index]);
                     newTangents.Add(tangents[index]);
                     newUv.Add(new Vector2(slot+Mathf.Lerp(UvInset,1f-UvInset,uv[index].x),uv[index].y));
@@ -164,11 +201,18 @@ namespace Sevo.Framework.Runtime
         private static Mesh? SelectPreview(Mesh? native,Brick owner) =>
             active is { } binding && ReferenceEquals(binding.Brick,owner) ? null : native;
 
-        internal static void Load(Brick brick,Brick template,Mesh mesh)
+        internal static void Load(Brick brick,Brick template,PreparedAttachmentVisual visual,StockRepeatUse repeatUse,Brick? ownedRepeat)
         {
             if (active!=null) throw new InvalidOperationException("Managed mesh resource loads cannot be nested.");
+            var mesh=visual.Mesh;
+            if(visual.Palette!=null && Array.Exists(visual.Palette,material=>material.paintMode==PaintMode.on))
+            {
+                brick.canPaint=true;
+                // Keel palettes use diffuse-colored emission. Use the ordinary paint tool color.
+                brick.hasGlowPaint=false;
+            }
             active = new Binding(brick,mesh);
-            try { StockTemplateResources.Load(brick,template); }
+            try { StockTemplateResources.Load(brick,template,repeatUse:repeatUse,ownedRepeat:ownedRepeat,visualMaterials:visual.Palette); }
             finally { active = null; }
 
             if (!ReferenceEquals(brick.VoxelMesh.Mesh,mesh) || brick.VoxelMesh.MeshPreview==null
@@ -176,6 +220,14 @@ namespace Sevo.Framework.Runtime
                 || colliderMesh==null || !ReferenceEquals(colliderMesh.GetValue(brick.VoxelCollider),colliderMesh.GetValue(template.VoxelCollider))
                 || !brick.VoxelCollider.bounds.Equals(template.VoxelCollider.bounds))
                 throw new InvalidOperationException("Native loading did not preserve the managed render and stock collider contracts.");
+
+            if (visual.RenderEnvelope is { } previewBounds) brick.VoxelMesh.MeshPreview.bounds=previewBounds;
+
+            if (!visual.PaintRequiresCustomPalette || visual.Palette != null)
+            {
+                if (visual.DefaultPaint is { } defaultPaint) brick.defaultPaint = defaultPaint;
+                if (visual.PreviewPaint is { } previewPaint) brick.PreviewPaint = previewPaint;
+            }
         }
 
         private sealed class Binding

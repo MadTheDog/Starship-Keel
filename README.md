@@ -16,7 +16,7 @@ This verifies Keel startup with your existing loader. Experimental block registr
 
 ## Current scope
 
-Keel defaults to audit mode. Experimental registration requires an explicit opt-in and a valid Uplink-managed session. The ordinary sample mods demonstrate stock hull registration and persistent IDs. The [functional-block API](docs/KEEL-FUNCTIONAL.md) lets a mod choose a supported native template and receive native Switch or Event Gate input in solo play. The [attachment API](docs/KEEL-WEAPON-ATTACHMENTS.md) adds native side slots, separately identified addons, and optional custom render meshes within a stock attachment footprint. Disk persistence, blueprints, custom collision geometry, and multiplayer remain outside the verified scope.
+Keel defaults to audit mode. Experimental registration requires an explicit opt-in and a valid Uplink-managed session. The sample mods demonstrate stock hull registration and persistent IDs. The [functional-block API](docs/KEEL-FUNCTIONAL.md) supports native templates and sustained Switch or Event Gate input in solo play. The [attachment API](docs/KEEL-WEAPON-ATTACHMENTS.md) supports native side slots, custom meshes and materials, native paint, and modular receiver visuals within the stock placement contract. Mods can [choose a native Codex category](docs/FRAMEWORK.md#choose-a-codex-category) for their managed content. The verified scope is solo placement and in-memory save reconstruction.
 
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
@@ -30,6 +30,7 @@ Install the .NET 8 SDK. Use the reference assemblies from your own Starship EVO 
 - Copy `BepInEx.dll`, `0Harmony.dll`, and `Mono.Cecil.dll` from `BepInEx/core` into `.refs/bepinex`.
 - Run `dotnet build src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj -c Release`. Build the SDK separately with `dotnet build src/Sevo.Framework.Sdk/Sevo.Framework.Sdk.csproj -c Release` if you only need the game-independent allocator.
 - Run `dotnet run --project tests/Sevo.Framework.Tests/Sevo.Framework.Tests.csproj -c Release` for the framework checks, or `./samples/Build-Samples.ps1` for sample mod ZIPs.
+- Run `./tests/Sevo.Framework.Tests/ModularReceiverContract.Tests.ps1 -RuntimeAssembly src/Sevo.Framework.Runtime/bin/Release/netstandard2.1/Sevo.Framework.Runtime.dll` after the Release build for the modular renderer contract checks.
 
 Game and third-party reference assemblies are supplied locally. The Keel release contains the two Keel DLLs.
 

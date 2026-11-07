@@ -15,7 +15,19 @@ ContentRegistration.Register("example.alpha", "hull", 1,
 
 The durable identity is `example.alpha:hull`, independent of its display name. The runtime supplies the numeric ID. Content revision1 is an explicit contract; changing it requires migration support, not a silent reassignment. Late or duplicate declarations reject.
 
-The public v0.1.0 native API supports ordinary stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected native templates, native placement callbacks, and one sustained logic input. Keel 0.1.4 adds [weapon attachment slots](KEEL-WEAPON-ATTACHMENTS.md) for opted-in receivers and separately registered addons, with optional custom visuals within the stock placement contract. Mods own their block definitions, assets, and gameplay. Compound shapes, custom collision, world migrations, and networked content need additional capabilities.
+Keel 0.1.0 supports stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected templates, placement callbacks, and sustained logic input. Keel 0.1.4 adds [weapon attachment slots](KEEL-WEAPON-ATTACHMENTS.md) and custom addon meshes within the stock placement contract. Keel 0.1.5 adds custom material palettes, native paint settings, receiver host and modular repeat visuals, and Codex category choice. Mods own their block definitions, assets, and gameplay.
+
+## Choose a Codex category
+
+With Keel 0.1.5, use the `codexCategory` overload of `RegisterFunctionalBlock`, `RegisterWeaponAttachmentReceiver`, `RegisterWeaponAttachment`, or `StockShape.CreateHull`. Pass the case-sensitive native `CodexTab` field name. For example, `"WEAPONS"` selects **Items → Weapons**. Other native Items names include `"CONSTRUCTION"`, `"INTERIOR"`, `"HULL_BLOCKS"`, and `"COMMANDS"` (Logic Elements).
+
+```csharp
+ContentRegistration.RegisterWeaponAttachment(
+    ownerId, localName, revision, displayName, selectTemplate,
+    codexCategory: "WEAPONS", selectVisual: selectAddonVisual);
+```
+
+Keel resolves the requested name against the game's live, visible Codex menus. An unavailable or unknown category logs a warning and uses the registration's default. Functional blocks, receivers, and attachments default to Logic Elements. `StockShape.CreateHull` defaults to Hull Blocks. Keel registers each visible definition once through the native Codex API and keeps owned repeat definitions hidden. The category is presentation metadata. Keep the same content key and revision when changing it.
 
 ## Allocation and persistence
 

@@ -11,6 +11,8 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
+    internal enum StockRepeatUse { None, Receiver, Segment }
+
     internal static class StockTemplateResources
     {
         private const string BrickType = "VoxelEngine.Brick";
@@ -119,13 +121,22 @@ namespace Sevo.Framework.Runtime
             loadResources = nativeLoad;
         }
 
-        internal static bool IsSupported(Brick brick,Brick template,bool legacyHull=false,bool allowStockRepeat=false) =>
-            TryBind(brick,template,legacyHull,allowStockRepeat)!=null;
+        internal static bool IsSupported(Brick brick,Brick template,bool legacyHull=false,
+            StockRepeatUse repeatUse=StockRepeatUse.None,Brick? ownedRepeat=null) =>
+            TryBind(brick,template,legacyHull,repeatUse,ownedRepeat)!=null;
 
-        internal static void Load(Brick brick,Brick template,bool legacyHull=false,bool allowStockRepeat=false)
+        internal static void Load(Brick brick,Brick template,bool legacyHull=false,StockRepeatUse repeatUse=StockRepeatUse.None,
+            Brick? ownedRepeat=null,VoxelMaterial[]? visualMaterials=null)
         {
             var load = loadResources ?? throw new InvalidOperationException("Stock material patch is not installed.");
-            var binding = TryBind(brick,template,legacyHull,allowStockRepeat) ?? throw new InvalidOperationException("Managed brick does not match the loaded stock recipe.");
+            var binding = TryBind(brick,template,legacyHull,repeatUse,ownedRepeat) ?? throw new InvalidOperationException("Managed brick does not match the loaded stock recipe.");
+            if (visualMaterials != null)
+            {
+                var baked = VoxelMaterialResources.materialParamDatas;
+                if (visualMaterials.Any(material => (uint)material.Id >= baked.Length || !material.Equals(baked[material.Id])))
+                    throw new InvalidOperationException("The prepared visual material rows are no longer available.");
+                binding = new MaterialBinding(binding.Recipe,visualMaterials);
+            }
             if (activeBinding != null)
                 throw new InvalidOperationException("Managed stock resource loads cannot be nested.");
 
@@ -144,14 +155,14 @@ namespace Sevo.Framework.Runtime
                     VoxelMaterialResources.MaterialCount = materialCount;
             }
             if (cursorChanged || !binding.Used || !ReferenceEquals(brick.VoxelMaterials, binding.Materials))
-                throw new InvalidOperationException("Managed resource loading did not reuse stock materials without advancing the native cursor.");
+                throw new InvalidOperationException("Managed resource loading did not reuse prepared materials without advancing the native cursor.");
         }
 
-        internal static bool IsTemplateAvailable(Brick? template, out string reason,bool allowStockRepeat=false)
+        internal static bool IsTemplateAvailable(Brick? template, out string reason,StockRepeatUse repeatUse=StockRepeatUse.None)
         {
             if (template == null || template.SubShapes != null || template.IsDecal || template.IsCollisionOff
-                || template.isRepeatBrick || template.childrenBrickID != 0
-                || template.hasRepeatBrick && (!allowStockRepeat || !HasSupportedRepeat(template))
+                || template.isRepeatBrick!=(repeatUse==StockRepeatUse.Segment) || template.childrenBrickID != 0
+                || template.hasRepeatBrick && (repeatUse!=StockRepeatUse.Receiver || GetStockRepeat(template)==null)
                 || string.IsNullOrWhiteSpace(template.nameMesh) || template.VoxelMesh == null || template.VoxelMesh.Mesh == null
                 || template.VoxelCollider?.subShapes == null || template.VoxelCollider.subShapes.Length != 1
                 || template.VoxelCollider.subShapes[0].shape != template.colliderShape)
@@ -179,13 +190,13 @@ namespace Sevo.Framework.Runtime
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static bool HasSupportedRepeat(Brick template)
+        internal static Brick? GetStockRepeat(Brick template)
         {
             if(template.repeatBrickId==0 || template.repeatBrickId>=Brick.BRICK_INDEX.Length
-                || template.repeatEvenBrickId!=0 || template.repeatOddBrickId!=0) return false;
+                || template.repeatEvenBrickId!=0 || template.repeatOddBrickId!=0) return null;
             var ring=Brick.BRICK_INDEX[template.repeatBrickId];
             return ring?.GetType()==typeof(Brick) && ring.isRepeatBrick && !ring.hasRepeatBrick && !ring.IsCommand
-                && ring.childrenBrickID==0 && ring.VoxelMesh?.Mesh!=null && ring.VoxelCollider!=null;
+                && ring.childrenBrickID==0 && ring.VoxelMesh?.Mesh!=null && ring.VoxelCollider!=null ? ring : null;
         }
 
         internal static (ResizeMode ResizeMode, object[] Args) CopyRecipe(Brick template)
@@ -197,16 +208,16 @@ namespace Sevo.Framework.Runtime
             return (resizeMode, (object[])recipe.Clone());
         }
 
-        private static MaterialBinding? TryBind(Brick brick,Brick template,bool legacyHull,bool allowStockRepeat)
+        private static MaterialBinding? TryBind(Brick brick,Brick template,bool legacyHull,StockRepeatUse repeatUse,Brick? ownedRepeat)
         {
-            if (!IsTemplateAvailable(template,out _,allowStockRepeat))
+            if (!IsTemplateAvailable(template,out _,repeatUse))
                 return null;
 
             if (argsField?.GetValue(brick) is not object[] recipe
                 || resizeModeField?.GetValue(brick) is not ResizeMode resizeMode || !resizeMode.Equals(template.VoxelMesh.ResizeMode)
                 || !string.Equals(brick.nameMesh, template.nameMesh, StringComparison.Ordinal)
                 || brick.SubShapes != null || brick.IsDecal || brick.IsCollisionOff || brick.colliderShape != template.colliderShape
-                || brick.isRepeatBrick || brick.hasRepeatBrick!=template.hasRepeatBrick || brick.childrenBrickID != 0
+                || brick.isRepeatBrick!=template.isRepeatBrick || brick.hasRepeatBrick!=template.hasRepeatBrick || brick.childrenBrickID != 0
                 || !brick.boundsOverride.Equals(template.boundsOverride) || !brick.boundsCulling.Equals(template.boundsCulling)
                 || brick.isDynamicGridSize != template.isDynamicGridSize || brick.gridLevel != template.gridLevel
                 || brick.minGridSize != template.minGridSize || brick.scaleUV != template.scaleUV
@@ -215,7 +226,7 @@ namespace Sevo.Framework.Runtime
                 || brick.isConveyorBelt != template.isConveyorBelt)
                 return null;
 
-            if(allowStockRepeat && !MatchesRepeat(brick,template)) return null;
+            if(repeatUse==StockRepeatUse.Receiver && !MatchesRepeat(brick,template,ownedRepeat)) return null;
 
             if (legacyHull)
             {
@@ -231,9 +242,11 @@ namespace Sevo.Framework.Runtime
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static bool MatchesRepeat(Brick brick,Brick template) => brick.repeatBrickId==template.repeatBrickId
+        internal static bool MatchesRepeat(Brick brick,Brick template,Brick? ownedRepeat) =>
+            brick.repeatBrickId==(ownedRepeat?.brickID ?? template.repeatBrickId)
             && brick.repeatBrickStart==template.repeatBrickStart && brick.repeatBrickEndOffset==template.repeatBrickEndOffset
-            && brick.repeatEvenBrickId==0 && brick.repeatOddBrickId==0;
+            && brick.repeatEvenBrickId==0 && brick.repeatOddBrickId==0
+            && (ownedRepeat==null || ownedRepeat.isRepeatBrick && ReferenceEquals(Brick.BRICK_INDEX[ownedRepeat.brickID],ownedRepeat));
 
         private static bool UseStockMaterials(object[] __0, ref VoxelMaterial[] __result)
         {

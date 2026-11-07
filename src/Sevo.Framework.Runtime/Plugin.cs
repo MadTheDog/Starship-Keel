@@ -10,13 +10,14 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.4")]
+    [BepInPlugin(Id,"Starship Keel","0.1.5")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
         private static Plugin? instance;
         private readonly RuntimeSnapshot status=new RuntimeSnapshot();
         private IReadOnlyDictionary<string,CapabilityResult> capabilities=new Dictionary<string,CapabilityResult>();
+        private string[] codexMenus=Array.Empty<string>();
         private ProfileSession? profile;
         private Harmony? harmony;
         private Harmony? functionalHarmony;
@@ -24,6 +25,9 @@ namespace Sevo.Framework.Runtime
         private Harmony? attachmentHarmony;
         private Harmony? attachmentInteractionHarmony;
         private Harmony? attachmentVisualHarmony;
+        private Harmony? receiverRepeatHarmony;
+        private Harmony? modularReceiverHarmony;
+        private readonly AttachmentMaterialResources attachmentMaterials=new AttachmentMaterialResources();
         private Assembly? pendingAttachmentGame;
         private CapabilityResult? pendingAttachmentCapability;
         private bool awaitingAttachmentInteraction;
@@ -60,6 +64,12 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult gateCapability;
                 CapabilityResult attachmentCapability;
                 CapabilityResult visualCapability;
+                CapabilityResult materialCapability;
+                CapabilityResult paintCapability;
+                CapabilityResult repeatCapability;
+                CapabilityResult defaultPaintCapability;
+                CapabilityResult modularCapability;
+                CapabilityResult codexCapability;
                 using(var metadata=AssemblyDefinition.ReadAssembly(game.Location))
                 {
                     status.AssemblyMvid=metadata.MainModule.Mvid.ToString("D");
@@ -70,6 +80,16 @@ namespace Sevo.Framework.Runtime
                     gateCapability=ContractAudit.EvaluateFunctionalEventGate(metadata.MainModule);
                     attachmentCapability=ContractAudit.EvaluateWeaponAttachments(metadata.MainModule);
                     visualCapability=ContractAudit.EvaluateAttachmentVisuals(metadata.MainModule);
+                    materialCapability=visualCapability.Available ? ContractAudit.EvaluateAttachmentMaterials(metadata.MainModule)
+                        : new CapabilityResult("attachmentMaterials",false,"Native attachment visuals are unavailable.");
+                    paintCapability=materialCapability.Available ? ContractAudit.EvaluateAttachmentPaint(metadata.MainModule)
+                        : new CapabilityResult("attachmentPaint",false,"Native attachment materials are unavailable.");
+                    repeatCapability=ContractAudit.EvaluateReceiverRepeats(metadata.MainModule);
+                    defaultPaintCapability=ContractAudit.EvaluateAttachmentDefaultPaint(metadata.MainModule);
+                    modularCapability=repeatCapability.Available && visualCapability.Available
+                        ? ContractAudit.EvaluateModularReceiverRendering(metadata.MainModule)
+                        : new CapabilityResult("modularReceiverRendering",false,"Native repeat or visual contracts are unavailable.");
+                    codexCapability=ContractAudit.EvaluateCodexCategories(metadata.MainModule,out codexMenus);
                     if(attachmentCapability.Available && !FunctionalStockTemplate.DiscoverReceiverTemplates(metadata.MainModule))
                         attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"No native side-slot receiver layout was found.");
                 }
@@ -89,12 +109,20 @@ namespace Sevo.Framework.Runtime
                 }
                 if(!functionalCapability.Available && attachmentCapability.Available)
                     attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"Shared functional command contracts are unavailable.");
-                status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,visualCapability})
+                status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
+                    visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
+                    codexCapability})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
                 Logger.LogInfo(attachmentCapability.Name+": "+attachmentCapability.Reason);
                 Logger.LogInfo(visualCapability.Name+": "+visualCapability.Reason);
+                Logger.LogInfo(materialCapability.Name+": "+materialCapability.Reason);
+                Logger.LogInfo(paintCapability.Name+": "+paintCapability.Reason);
+                Logger.LogInfo(repeatCapability.Name+": "+repeatCapability.Reason);
+                Logger.LogInfo(defaultPaintCapability.Name+": "+defaultPaintCapability.Reason);
+                Logger.LogInfo(modularCapability.Name+": "+modularCapability.Reason);
+                Logger.LogInfo(codexCapability.Name+": "+codexCapability.Reason);
                 if(!Available("lifecycle"))
                 {
                     status.Reason="Audit metadata available; lifecycle observation unavailable.";
@@ -179,8 +207,25 @@ namespace Sevo.Framework.Runtime
         internal static void ReportFunctionalFailure(string key,Exception exception) =>
             instance?.Logger.LogError("Functional placement stopped for "+key+". "+exception);
 
-        internal static UnityEngine.Mesh? PrepareAttachmentVisual(string key,VoxelEngine.Brick template,
-            Func<WeaponAttachmentVisual?> selectVisual)
+        internal static bool ReceiverRepeatsAvailable(out string reason)
+        {
+            var report=instance?.status.Capabilities.Single(value=>value.Name=="receiverRepeats");
+            reason=report?.Reason ?? "Native receiver repeat capability is unavailable.";
+            return report?.Available==true;
+        }
+
+        internal static UI.Codex.CodexTab ResolveCodexCategory(string? name,UI.Codex.CodexTab fallback,string key)
+        {
+            if(name==null || instance is not { } plugin) return fallback;
+            var report=plugin.status.Capabilities.Single(value=>value.Name=="codexCategories");
+            if(report.Available && CodexCategories.Find(name,plugin.codexMenus) is { } category) return category;
+            plugin.Logger.LogWarning("Using the default Codex category for "+key+": "
+                +(report.Available ? name+" is unavailable in the visible native Codex." : report.Reason));
+            return fallback;
+        }
+
+        internal static PreparedAttachmentVisual? PrepareAttachmentVisual(string key,VoxelEngine.Brick template,
+            Func<WeaponAttachmentVisual?> selectVisual,bool requiresRepeatRendering,UnityEngine.Bounds? renderEnvelope)
         {
             var plugin=instance;
             if(plugin==null) return null;
@@ -190,13 +235,79 @@ namespace Sevo.Framework.Runtime
                 if(!report.Available) throw new InvalidOperationException(report.Reason);
                 var visual=selectVisual();
                 if(visual==null) return null;
+                if(requiresRepeatRendering) plugin.EnsureReceiverRepeatHook();
                 plugin.EnsureAttachmentVisualHook(report);
-                return AttachmentVisualResources.Prepare(visual,template,key);
+                var paintReport=plugin.status.Capabilities.Single(value=>value.Name=="attachmentDefaultPaint");
+                if(!paintReport.Available && (visual.DefaultPaint!=null || visual.PreviewPaint!=null))
+                    plugin.Logger.LogWarning("Using stock paint defaults for "+key+": "+paintReport.Reason);
+                var prepared=new PreparedAttachmentVisual(
+                    AttachmentVisualResources.Prepare(visual,template,key,renderEnvelope:renderEnvelope),
+                    paintReport.Available ? visual : null,renderEnvelope);
+                if(visual.Materials!=null)
+                {
+                    var materialReport=plugin.status.Capabilities.Single(value=>value.Name=="attachmentMaterials");
+                    if(materialReport.Available) plugin.attachmentMaterials.Stage(key,template,visual,prepared);
+                    else plugin.Logger.LogWarning("Using baked material fallbacks for "+key+": "+materialReport.Reason);
+                }
+                return prepared;
             }
             catch(Exception exception)
             {
-                plugin.Logger.LogWarning("Using stock visual for "+key+": "+exception.Message);
+                ReportVisualFallback(key,exception.Message);
                 return null;
+            }
+        }
+
+        internal static void ReportVisualFallback(string key,string reason) =>
+            instance?.Logger.LogWarning("Using stock visual for "+key+": "+reason);
+
+        internal static bool TryEnableModularReceiverRendering(out string reason)
+        {
+            var plugin=instance;
+            if(plugin==null)
+            {
+                reason="The modular receiver session is unavailable.";
+                return false;
+            }
+            var report=plugin.status.Capabilities.Single(value=>value.Name=="modularReceiverRendering");
+            reason=report.Reason;
+            if(!report.Available) return false;
+            if(plugin.modularReceiverHarmony!=null) return true;
+            var hook=new Harmony(Id+".modularreceivers");
+            try
+            {
+                ReceiverModularRendering.Install(hook);
+                plugin.modularReceiverHarmony=hook;
+                return true;
+            }
+            catch(Exception exception)
+            {
+                report.Available=false;
+                reason=report.Reason="Native modular receiver hooks unavailable: "+exception.Message;
+                try { hook.UnpatchSelf(); }
+                catch(Exception cleanup) { plugin.Logger.LogWarning("Modular receiver hook cleanup failed: "+cleanup.Message); }
+                return false;
+            }
+        }
+
+        private void EnsureReceiverRepeatHook()
+        {
+            if(receiverRepeatHarmony!=null) return;
+            var report=status.Capabilities.Single(value=>value.Name=="receiverRepeats");
+            if(!report.Available) throw new InvalidOperationException(report.Reason);
+            var hook=new Harmony(Id+".receiverrepeats");
+            try
+            {
+                ReceiverRepeatRendering.Install(hook);
+                receiverRepeatHarmony=hook;
+            }
+            catch(Exception exception)
+            {
+                report.Available=false;
+                report.Reason="Native receiver repeat rendering hook unavailable: "+exception.Message;
+                try { hook.UnpatchSelf(); }
+                catch(Exception cleanup) { Logger.LogWarning("Receiver repeat hook cleanup failed: "+cleanup.Message); }
+                throw new InvalidOperationException(report.Reason,exception);
             }
         }
 
@@ -310,7 +421,11 @@ namespace Sevo.Framework.Runtime
                 var failure=definition.PrepareTemplate is { } prepare
                     ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null)
                     : hullAvailable ? null : "The legacy stock hull contract is unavailable.";
-                if(failure==null) admitted.Add(definition);
+                if(failure==null)
+                {
+                    if(definition.OwnedRepeat is { } repeat) admitted.Add(repeat);
+                    admitted.Add(definition);
+                }
                 else Logger.LogWarning("Skipped "+definition.Key+": "+failure);
             }
             var spaces=adapter!.AllocationSpaces(limits!);
@@ -318,6 +433,17 @@ namespace Sevo.Framework.Runtime
             var allocator=saved==null ? new ContentAllocator(spaces,profile.ProfileId) : ContentAllocator.FromJson(saved,spaces);
             registration=new NativeRegistrationSession(adapter);
             registration.Commit(admitted,allocator,profile.WriteRegistry);
+            var paintReport=status.Capabilities.Single(value=>value.Name=="attachmentPaint");
+            var materialFailure=attachmentMaterials.Commit(paintReport.Available,message=>Logger.LogWarning(message));
+            if(materialFailure!=null)
+            {
+                var report=status.Capabilities.Single(value=>value.Name=="attachmentMaterials");
+                report.Available=false;
+                report.Reason=materialFailure;
+                paintReport.Available=false;
+                paintReport.Reason="Native attachment materials are unavailable.";
+                Logger.LogWarning(materialFailure);
+            }
             adapter.InitializeManagedResources(registration);
             adapter.ValidateResources(registration,limits!,false);
             status.RegistrationAdmitted=true;
@@ -373,6 +499,8 @@ namespace Sevo.Framework.Runtime
             FunctionalEventGate.Enabled=false;
             WeaponAttachmentAvailability.Enabled=false;
             attachmentVisualHarmony?.UnpatchSelf();
+            modularReceiverHarmony?.UnpatchSelf();
+            receiverRepeatHarmony?.UnpatchSelf();
             attachmentInteractionHarmony?.UnpatchSelf();
             attachmentHarmony?.UnpatchSelf();
             instance=null;
@@ -409,6 +537,7 @@ namespace Sevo.Framework.Runtime
                 if(plugin.experimental)
                 {
                     if(plugin.registration==null) throw new InvalidOperationException("Resource-ready callback preceded managed registration.");
+                    plugin.attachmentMaterials.VerifyBindings();
                     plugin.adapter!.ValidateResources(plugin.registration,plugin.limits!,true);
                 }
                 plugin.resourceChecksPassed=!plugin.status.Failed && plugin.Available("brickRegistry") && plugin.Available("nativeResources")

@@ -21,8 +21,6 @@ if(args.Length>0 && args[0]=="audit") {
  Console.WriteLine($"{eventGate.Name}: {eventGate.Available}; {eventGate.Reason}");
  var attachments=Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(current.MainModule);
  Console.WriteLine($"{attachments.Name}: {attachments.Available}; {attachments.Reason}");
- var visuals=Sevo.Framework.Runtime.ContractAudit.EvaluateAttachmentVisuals(current.MainModule);
- Console.WriteLine($"{visuals.Name}: {visuals.Available}; {visuals.Reason}");
  var limits=Sevo.Framework.Runtime.ContractAudit.ReadLimits(current.MainModule);
  Console.WriteLine($"Safe brick bound={limits.SafeBrickCapacity}; packed={limits.PackedCapacity}; properties={limits.BrickPropertiesCapacity}; collider primary={limits.ColliderPrimaryCapacity}; collider data={limits.ColliderDataCapacity}; shape templates={limits.ShapeCapacity}");
  Console.WriteLine("Diagnostic MVID="+current.MainModule.Mvid+"; no identity gate");
@@ -57,10 +55,10 @@ var game = AssemblyDefinition.ReadAssembly(".refs/game/Assembly-CSharp.dll");
 using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtime.ContractAudit).Assembly.Location))
 {
  var registrations=framework.MainModule.GetType("Sevo.Framework.Runtime.ContentRegistration").Methods;
- Check(registrations.Count(method=>method.IsPublic && method.Name.StartsWith("RegisterFunctional",StringComparison.Ordinal))==1
-  && registrations.Any(method=>method.IsPublic && method.Name=="RegisterFunctionalBlock"
+ Check(registrations.Count(method=>method.IsPublic && method.Name=="RegisterFunctionalBlock")==2
+  && registrations.Any(method=>method.IsPublic && method.Name=="RegisterFunctionalBlock" && method.Parameters.Count==6
    && method.Parameters.Any(parameter=>parameter.ParameterType.FullName=="System.Func`1<VoxelEngine.Brick>")),
-  "functional registration exposes one caller-selected template API");
+  "functional registration preserves the caller-selected template API and adds a category overload");
  Check(framework.MainModule.GetType("Sevo.Framework.Runtime.StockRepairBeam")==null,
   "the framework must not contain the sample's template policy");
  Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachmentReceiver"
@@ -72,6 +70,22 @@ using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtim
  Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachment" && method.Parameters.Count==6
    && method.Parameters[5].ParameterType.FullName=="System.Func`1<Sevo.Framework.Runtime.WeaponAttachmentVisual>"),
   "a separate custom visual overload preserves the stock-only attachment API");
+ Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachmentReceiver" && method.Parameters.Count==8
+   && method.Parameters[7].ParameterType.FullName=="System.Func`1<Sevo.Framework.Runtime.WeaponAttachmentVisual>"),
+  "a separate host visual overload preserves the stock-only receiver API");
+ Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachmentReceiver" && method.Parameters.Count==10
+   && method.Parameters[8].Name=="repeatLocalName"
+   && method.Parameters[9].ParameterType.FullName=="System.Func`1<Sevo.Framework.Runtime.WeaponAttachmentVisual>"),
+  "owned receiver repeats declare a durable companion name and separate visual selector");
+ Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachmentReceiver" && method.Parameters.Count==11
+   && method.Parameters[10].Name=="modularSections" && method.Parameters[10].ParameterType.FullName=="System.Boolean"),
+  "modular sections opt in without changing existing receiver declarations");
+ Check(new[]{"RegisterFunctionalBlock","RegisterWeaponAttachment","RegisterWeaponAttachmentReceiver"}.All(name=>
+   registrations.Any(method=>method.IsPublic && method.Name==name && method.Parameters.Any(parameter=>
+     parameter.Name=="codexCategory" && parameter.ParameterType.FullName=="System.String")))
+   && framework.MainModule.GetType("Sevo.Framework.Runtime.StockShape").Methods.Any(method=>method.IsPublic
+     && method.Name=="CreateHull" && method.Parameters.Last().Name=="codexCategory"),
+  "the supported brick factories expose native Codex category selection");
 }
 var results = Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(results["packedIds"].Available && results["lifecycle"].Available,"current game contracts");
@@ -150,6 +164,27 @@ Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainM
 Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available,"identity must not gate Event Gate input");
 Check(Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available,"identity must not gate weapon attachments");
 Check(VisualCapability().Available,"identity must not gate attachment visuals");
+var repeats=Sevo.Framework.Runtime.ContractAudit.EvaluateReceiverRepeats(game.MainModule);
+Check(repeats.Available,"current receiver repeats survive an unrelated identity change: "+repeats.Reason);
+var repeatUpdate=game.MainModule.GetType("VoxelEngine.Brick").Methods.Single(method=>method.Name=="UpdateRenderData"
+  && method.Parameters[0].ParameterType.FullName=="VoxelEngine.BrickInstanceData");
+var recursiveCall=repeatUpdate.Body.Instructions.Single(instruction=>instruction.Operand is MethodReference method
+  && method.FullName==repeatUpdate.FullName);
+var childFlag=recursiveCall.Previous;
+var childFlagCode=childFlag.OpCode;
+childFlag.OpCode=Mono.Cecil.Cil.OpCodes.Ldc_I4_0;
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateReceiverRepeats(game.MainModule).Available && VisualCapability().Available,
+  "a changed repeat render call disables repeat support independently of add-on visuals");
+childFlag.OpCode=childFlagCode;
+var loadRepeats=game.MainModule.GetType("VoxelEngine.EntityBricks").Methods.Single(method=>method.Name=="RegisterBrickOnLoad");
+var savedRepeatFlag=loadRepeats.Body.Instructions.First(instruction=>instruction.Operand is FieldReference field
+  && field.Name=="isRepeatBrick");
+var savedRepeatOperand=savedRepeatFlag.Operand;
+savedRepeatFlag.Operand=game.MainModule.GetType("VoxelEngine.Brick").Fields.Single(field=>field.Name=="canPaint");
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateReceiverRepeats(game.MainModule).Available
+  && Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available,
+  "a changed saved repeat contract disables owned repeats independently of ordinary attachment interaction");
+savedRepeatFlag.Operand=savedRepeatOperand;
 var mask=game.MainModule.GetType("VoxelEngine.BrickIndex").Fields.Single(x=>x.Name=="BRICK_MASK"); var originalMask=mask.Constant; mask.Constant=Convert.ToInt32(originalMask)/2;
 var altered=Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(!altered["packedIds"].Available && altered["lifecycle"].Available,"packed mask failure isolated");
@@ -177,4 +212,7 @@ try {
 checks += ExpandedTests.Run();
 checks += RegistrationTests.Run();
 checks += FunctionalLifetimeTests.Run();
+checks += AttachmentMaterialAuditTests.Run();
+checks += AttachmentDefaultPaintAuditTests.Run();
+checks += CodexCategoryAuditTests.Run();
 Console.WriteLine($"{checks} checks passed");

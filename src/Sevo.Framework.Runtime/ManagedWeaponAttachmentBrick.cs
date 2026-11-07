@@ -257,17 +257,21 @@ namespace Sevo.Framework.Runtime
                 || !SamePlacement(data, entity.Bricks.GetBrickData(data.instanceId))
                 || CommandManager.GetCommand(hit.BrickIds.commandId) is not WeaponAttachmentReceiverCommand receiver)
                 return null;
-            var parent = receiver.brickData;
+            return receiver.brickCoord.entityID==hit.entityID && MatchesRepeatPlacement(receiver.brickData,data) ? receiver : null;
+        }
+
+        internal static bool MatchesRepeatPlacement(BrickInstanceData parent,BrickInstanceData data)
+        {
             var definition = parent.Brick;
-            if (definition?.VoxelMesh == null || definition.repeatBrickId != data.brickId || receiver.brickCoord.entityID != hit.entityID
+            if (definition?.VoxelMesh == null || !FunctionalStockTemplate.IsReceiverRepeat(definition,data.brickId)
                 || parent.rotation != data.rotation || parent.gridLevel != data.gridLevel)
-                return null;
+                return false;
             var local = parent.QuaternionInv * (data.gridPosition - parent.gridPosition);
             int unit = Mathf.RoundToInt(parent.GridSize * definition.VoxelMesh.ResizeMode.unitStud);
             if (local.x != 0 || local.z != 0 || unit <= 0 || local.y % unit != 0)
-                return null;
+                return false;
             int index = local.y / unit;
-            return index >= definition.repeatBrickStart && index <= parent.Scale.y + definition.repeatBrickEndOffset ? receiver : null;
+            return index >= definition.repeatBrickStart && index <= parent.Scale.y + definition.repeatBrickEndOffset;
         }
 
         private static bool SamePlacement(BrickInstanceData first, BrickInstanceData second) =>

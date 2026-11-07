@@ -1,6 +1,6 @@
 # Starship Keel changelog
 
-## Unreleased
+## [0.1.5](https://github.com/MadTheDog/Starship-Keel/releases/tag/v0.1.5)
 
 - Added named native Codex category selection for managed hulls, functional blocks, receivers, and attachments. The solo lab verified visible entries in Weapons, Construction, and Interior, default-category fallback, and hidden owned repeats.
 - Fixed the half-bay offset in modular receivers. Centered section meshes, previews, and renderer culling bounds now align with the native bay and socket.

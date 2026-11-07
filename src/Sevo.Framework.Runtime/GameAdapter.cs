@@ -38,7 +38,7 @@ namespace Sevo.Framework.Runtime
         public void InitializeManagedResources(NativeRegistrationSession session)
         {
             session.VerifyOwnership();
-            foreach (Brick brick in session.Owned.Values)
+            foreach (var brick in session.Owned.Values.Cast<Brick>().OrderBy(brick=>!brick.isRepeatBrick))
             {
                 if (!FunctionalStockTemplate.TryLoad(brick))
                     StockTemplateResources.Load(brick,StockShape.HullTemplate(),legacyHull:true);
@@ -84,6 +84,7 @@ namespace Sevo.Framework.Runtime
             foreach(var pair in session.Owned)
             {
                 var brick=(Brick)pair.Value;
+                FunctionalStockTemplate.VerifyRepeatBinding(brick);
                 if(pair.Key>=limits.SafeBrickCapacity || pair.Key>=Brick.BrickProperties.Length || pair.Key>=BrickCollider.Datas.Length
                     || !Brick.BrickProperties[pair.Key].isValid || brick.VoxelMesh==null || brick.VoxelCollider==null
                     || brick.VoxelMaterials==null || brick.VoxelMaterials.Length==0
@@ -103,12 +104,19 @@ namespace Sevo.Framework.Runtime
     /// <summary>Experimental factory helper for an ordinary cube using native hull geometry and raw material input.</summary>
     public static class StockShape
     {
-        public static object CreateHull(int id,string displayName)
+        public static object CreateHull(int id,string displayName) => CreateHullInTab(id,displayName,CodexTab.HULL_BLOCKS);
+
+        /// <summary>Creates an ordinary stock hull in a named native Codex category.</summary>
+        public static object CreateHull(int id,string displayName,string codexCategory)
+            => CreateHullInTab(id,displayName,Plugin.ResolveCodexCategory(
+                ContentRegistration.RequireCodexCategory(codexCategory),CodexTab.HULL_BLOCKS,displayName));
+
+        private static object CreateHullInTab(int id,string displayName,CodexTab tab)
         {
             var template=HullTemplate();
             var brick=new Brick(id,displayName,template.nameMesh,ResizeMode.BlockFull,"Hull/HullA");
             CopyHullFields(brick,template);
-            brick.Tab(CodexTab.HULL_BLOCKS);
+            brick.Tab(tab);
             return brick;
         }
 

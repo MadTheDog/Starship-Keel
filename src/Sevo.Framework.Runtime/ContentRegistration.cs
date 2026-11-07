@@ -14,13 +14,15 @@ namespace Sevo.Framework.Runtime
         internal Func<int,object> Factory { get; }
         internal Func<string?>? PrepareTemplate { get; }
         internal ContentKind Kind { get; }
+        internal ContentDefinition? OwnedRepeat { get; }
         internal bool IsFunctional => Kind is ContentKind.Functional or ContentKind.AttachmentReceiver;
         internal bool RequiresWeaponAttachments => Kind is ContentKind.AttachmentReceiver or ContentKind.Attachment;
-        internal ContentDefinition(string key,int revision,Func<int,object> factory,Func<string?>? prepareTemplate,ContentKind kind)
-        { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; Kind=kind; }
+        internal ContentDefinition(string key,int revision,Func<int,object> factory,Func<string?>? prepareTemplate,
+            ContentKind kind,ContentDefinition? ownedRepeat=null)
+        { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; Kind=kind; OwnedRepeat=ownedRepeat; }
     }
 
-    internal enum ContentKind { Ordinary, Functional, AttachmentReceiver, Attachment }
+    internal enum ContentKind { Ordinary, Functional, AttachmentReceiver, Attachment, ReceiverRepeat }
 
     public sealed class RegistrationCatalog
     {
@@ -31,16 +33,20 @@ namespace Sevo.Framework.Runtime
             => Register(ownerId,localName,revision,brickFactory,null,ContentKind.Ordinary);
 
         internal void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory,
-            Func<string?>? prepareTemplate,ContentKind kind)
+            Func<string?>? prepareTemplate,ContentKind kind,ContentDefinition? ownedRepeat=null)
         {
             var key=ownerId+":"+localName;
             ContentAllocator.ValidateKey(key);
             if(revision<1 || brickFactory==null) throw new InvalidOperationException("A positive revision and factory are required.");
+            if(ownedRepeat!=null) ContentAllocator.ValidateKey(ownedRepeat.Key);
             lock(gate)
             {
                 if(sealedCatalog) throw new InvalidOperationException("Registration collection is closed; restart required.");
                 if(definitions.ContainsKey(key)) throw new InvalidOperationException("Duplicate content key: "+key);
-                definitions.Add(key,new ContentDefinition(key,revision,brickFactory,prepareTemplate,kind));
+                if(ownedRepeat!=null && (ownedRepeat.Key==key || definitions.ContainsKey(ownedRepeat.Key)))
+                    throw new InvalidOperationException("Duplicate content key: "+ownedRepeat.Key);
+                definitions.Add(key,new ContentDefinition(key,revision,brickFactory,prepareTemplate,kind,ownedRepeat));
+                if(ownedRepeat!=null) definitions.Add(ownedRepeat.Key,ownedRepeat);
             }
         }
         public IReadOnlyList<ContentDefinition> Seal()
@@ -48,7 +54,8 @@ namespace Sevo.Framework.Runtime
             lock(gate)
             {
                 sealedCatalog=true;
-                return Array.AsReadOnly(definitions.Values.OrderBy(value=>value.Key,StringComparer.Ordinal).ToArray());
+                return Array.AsReadOnly(definitions.Values.Where(value=>value.Kind!=ContentKind.ReceiverRepeat)
+                    .OrderBy(value=>value.Key,StringComparer.Ordinal).ToArray());
             }
         }
     }
@@ -66,17 +73,75 @@ namespace Sevo.Framework.Runtime
             Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory)
             => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,behaviorFactory,null,ContentKind.Functional);
 
+        /// <summary>Declares a functional block in a named native Codex category.</summary>
+        public static void RegisterFunctionalBlock(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,string codexCategory)
+            => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,behaviorFactory,null,ContentKind.Functional,
+                codexCategory:RequireCodexCategory(codexCategory));
+
         /// <summary>Declares a functional receiver using a stock side-slot layout and an explicit set of compatible content keys.</summary>
         public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
             Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
             Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory)
+            => RegisterReceiver(ownerId,localName,revision,displayName,selectTemplate,compatibleAttachmentKeys,behaviorFactory,null);
+
+        /// <summary>Declares a receiver with a custom host visual and the template's native repeat segments.</summary>
+        public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,Func<WeaponAttachmentVisual?> selectVisual)
+            => RegisterReceiver(ownerId,localName,revision,displayName,selectTemplate,compatibleAttachmentKeys,behaviorFactory,
+                selectVisual ?? throw new ArgumentNullException(nameof(selectVisual)));
+
+        /// <summary>Declares a receiver and a hidden, separately identified repeat using the template's stock ring footprint.</summary>
+        /// <param name="repeatLocalName">Permanent local content name for the repeat definition in the receiver's namespace.</param>
+        public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,Func<WeaponAttachmentVisual?>? selectVisual,
+            string repeatLocalName,Func<WeaponAttachmentVisual?> selectRepeatVisual)
+            => RegisterWeaponAttachmentReceiver(ownerId,localName,revision,displayName,selectTemplate,compatibleAttachmentKeys,
+                behaviorFactory,selectVisual,repeatLocalName,selectRepeatVisual,modularSections:false);
+
+        /// <summary>Optionally renders one full, unscaled visual section at each native repeat position.</summary>
+        /// <param name="modularSections">Requires a repeat at every native bay and a valid full-section repeat visual.</param>
+        public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,Func<WeaponAttachmentVisual?>? selectVisual,
+            string repeatLocalName,Func<WeaponAttachmentVisual?> selectRepeatVisual,bool modularSections)
+        {
+            if(string.IsNullOrWhiteSpace(repeatLocalName)) throw new ArgumentException("A repeat content name is required.",nameof(repeatLocalName));
+            if(selectRepeatVisual==null) throw new ArgumentNullException(nameof(selectRepeatVisual));
+            RegisterReceiver(ownerId,localName,revision,displayName,selectTemplate,compatibleAttachmentKeys,behaviorFactory,
+                selectVisual,repeatLocalName,selectRepeatVisual,modularSections);
+        }
+
+        /// <summary>Declares a receiver in a named native Codex category, with optional host and repeat visuals.</summary>
+        public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,string codexCategory,
+            Func<WeaponAttachmentVisual?>? selectVisual=null,string? repeatLocalName=null,
+            Func<WeaponAttachmentVisual?>? selectRepeatVisual=null,bool modularSections=false)
+        {
+            if((repeatLocalName==null)!=(selectRepeatVisual==null) || (modularSections && repeatLocalName==null))
+                throw new ArgumentException("An owned repeat requires both a name and a visual selector.",nameof(repeatLocalName));
+            if(repeatLocalName!=null && string.IsNullOrWhiteSpace(repeatLocalName))
+                throw new ArgumentException("A repeat content name is required.",nameof(repeatLocalName));
+            RegisterReceiver(ownerId,localName,revision,displayName,selectTemplate,compatibleAttachmentKeys,behaviorFactory,
+                selectVisual,repeatLocalName,selectRepeatVisual,modularSections,RequireCodexCategory(codexCategory));
+        }
+
+        private static void RegisterReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory,Func<WeaponAttachmentVisual?>? selectVisual,
+            string? repeatLocalName=null,Func<WeaponAttachmentVisual?>? selectRepeatVisual=null,bool modularSections=false,
+            string? codexCategory=null)
         {
             if (compatibleAttachmentKeys==null) throw new ArgumentNullException(nameof(compatibleAttachmentKeys));
             var keys=compatibleAttachmentKeys.Distinct(StringComparer.Ordinal).ToArray();
             if(keys.Length==0) throw new ArgumentException("At least one compatible attachment key is required.",nameof(compatibleAttachmentKeys));
             foreach(var key in keys) ContentAllocator.ValidateKey(key);
             RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,behaviorFactory,
-                Array.AsReadOnly(keys),ContentKind.AttachmentReceiver);
+                Array.AsReadOnly(keys),ContentKind.AttachmentReceiver,selectVisual,repeatLocalName,selectRepeatVisual,
+                modularSections,codexCategory);
         }
 
         /// <summary>Declares a separately identified native side attachment using mod-selected stock geometry.</summary>
@@ -90,27 +155,44 @@ namespace Sevo.Framework.Runtime
             => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,null,null,ContentKind.Attachment,
                 selectVisual ?? throw new ArgumentNullException(nameof(selectVisual)));
 
+        /// <summary>Declares an attachment in a named native Codex category with optional custom geometry.</summary>
+        public static void RegisterWeaponAttachment(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,string codexCategory,Func<WeaponAttachmentVisual?>? selectVisual=null)
+            => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,null,null,ContentKind.Attachment,
+                selectVisual,codexCategory:RequireCodexCategory(codexCategory));
+
+        internal static string RequireCodexCategory(string name) =>
+            !string.IsNullOrWhiteSpace(name) ? name : throw new ArgumentException("A native Codex category name is required.","codexCategory");
+
         private static void RegisterPrepared(string ownerId,string localName,int revision,string displayName,
             Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior>? behaviorFactory,
-            IReadOnlyCollection<string>? compatibleAttachmentKeys,ContentKind kind,Func<WeaponAttachmentVisual?>? selectVisual=null)
+            IReadOnlyCollection<string>? compatibleAttachmentKeys,ContentKind kind,Func<WeaponAttachmentVisual?>? selectVisual=null,
+            string? repeatLocalName=null,Func<WeaponAttachmentVisual?>? selectRepeatVisual=null,bool modularSections=false,
+            string? codexCategory=null)
         {
             if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.",nameof(displayName));
             if (selectTemplate==null) throw new ArgumentNullException(nameof(selectTemplate));
             if (kind!=ContentKind.Attachment && behaviorFactory==null) throw new ArgumentNullException(nameof(behaviorFactory));
             var key=ownerId+":"+localName;
             FunctionalStockTemplate? template=null;
+            var repeatKey=repeatLocalName==null ? null : ownerId+":"+repeatLocalName;
+            var ownedRepeat=repeatKey==null ? null : new ContentDefinition(repeatKey,revision,
+                id=>(template ?? throw new InvalidOperationException("Native receiver was not prepared.")).CreateRepeat(id,displayName),
+                null,ContentKind.ReceiverRepeat);
             Catalog.Register(ownerId,localName,revision,id=>
             {
                 var prepared=template ?? throw new InvalidOperationException("Native template was not prepared.");
-                if(kind==ContentKind.Attachment) return prepared.CreateAttachment(id,displayName,key);
+                var tab=Plugin.ResolveCodexCategory(codexCategory,UI.Codex.CodexTab.COMMANDS,key);
+                if(kind==ContentKind.Attachment) return prepared.CreateAttachment(id,displayName,key,tab);
                 var binding=new FunctionalBinding(key,id,behaviorFactory!,compatibleAttachmentKeys);
-                return prepared.Create(id,displayName,binding);
+                return prepared.Create(id,displayName,binding,tab);
             },()=>
             {
                 if(!FunctionalStockTemplate.TryPrepare(selectTemplate(),kind,out template,out var reason)) return reason;
-                if(selectVisual!=null) template!.PrepareVisual(key,selectVisual);
+                if(ownedRepeat!=null && !template!.TryPrepareRepeat(ownedRepeat.Key,selectRepeatVisual!,modularSections,out reason)) return reason;
+                if(selectVisual!=null && (!modularSections || template!.UsesModularSections)) template!.PrepareVisual(key,selectVisual);
                 return null;
-            },kind);
+            },kind,ownedRepeat);
         }
     }
 
