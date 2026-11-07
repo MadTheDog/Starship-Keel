@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "example.alpha",
+  "name": "Example Alpha Hull",
+  "version": "0.1.0",
+  "payloadRoot": "plugin",
+  "dependencies": {},
+  "conflicts": [],
+  "fixedBrickIds": [],
+  "fixedShapeIds": []
+}
