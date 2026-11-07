@@ -18,7 +18,7 @@ namespace Sevo.Framework.Runtime
     }
 
     /// <summary>Reads metadata only. Identity values are never consulted for compatibility.</summary>
-    public static class ContractAudit
+    public static partial class ContractAudit
     {
         private static MethodDefinition? Method(ModuleDefinition module, string type, string name, bool isStatic, string result, params string[] parameters)
             => module.GetType(type)?.Methods.SingleOrDefault(method => method.Name == name && method.IsStatic == isStatic
@@ -129,10 +129,10 @@ namespace Sevo.Framework.Runtime
                 var awake=Method(module,"ResourcesLoader","Awake",false,"System.Void") ?? throw new InvalidOperationException("Missing ResourcesLoader.Awake.");
                 foreach(var target in new[]{("VoxelEngine.Brick","LoadAllResourcesRuntime"),("VoxelEngine.BrickCollider","AllocateResources"),("Manager.GameResourcesManager","AllocateResources"),("Manager.GameResourcesManager","OnResourceLoaded"),("Manager.GameResourcesManager","OnGameReload"),("Manager.GameResourcesManager","ReleaseResources")})
                     if(Method(module,target.Item1,target.Item2,true,"System.Void")==null) throw new InvalidOperationException("Missing lifecycle signature: "+target);
-                int tab=UniqueCall(awake,"VoxelEngine.TabHull","WakeUp"), collider=UniqueCall(awake,"VoxelEngine.BrickCollider","AllocateResources"), bricks=UniqueCall(awake,"VoxelEngine.Brick","LoadAllResourcesRuntime"), allocate=UniqueCall(awake,"Manager.GameResourcesManager","AllocateResources");
+                int collider=UniqueCall(awake,"VoxelEngine.BrickCollider","AllocateResources"), bricks=UniqueCall(awake,"VoxelEngine.Brick","LoadAllResourcesRuntime"), allocate=UniqueCall(awake,"Manager.GameResourcesManager","AllocateResources");
                 int reload=UniqueCall(awake,"Manager.GameResourcesManager","OnGameReload"), ready=UniqueCall(awake,"Manager.GameResourcesManager","OnResourceLoaded");
-                if (!(reload < ready && ready < tab && tab < collider && collider < bricks && bricks < allocate)
-                    || !awake.Body.Instructions.Skip(ready+1).Take(tab-ready-1).Any(instruction=>instruction.OpCode.Code==Code.Ret))
+                if (!(reload < ready && ready < collider && collider < bricks && bricks < allocate)
+                    || !awake.Body.Instructions.Skip(ready+1).Take(collider-ready-1).Any(instruction=>instruction.OpCode.Code==Code.Ret))
                     throw new InvalidOperationException("Initial/reload lifecycle ordering changed.");
                 var allocator=Method(module,"Manager.GameResourcesManager","AllocateResources",true,"System.Void")!;
                 UniqueCall(allocator,"Manager.GameResourcesManager","OnResourceLoaded");
@@ -188,6 +188,8 @@ namespace Sevo.Framework.Runtime
                     || Method(module,"VoxelEngine.Brick","get_IsCommand",false,"System.Boolean")?.IsPublic!=true)
                     throw new InvalidOperationException("Stock-hull tab or command-identity signature changed.");
             },"Stock-hull example binding contracts available; assets are validated during native initialization.");
+            var materials=StockTemplateResources.Evaluate(module);
+            results.Add(materials.Name,materials);
             return results;
         }
     }

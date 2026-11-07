@@ -15,6 +15,10 @@ if(args.Length>0 && args[0]=="audit") {
  using var current=AssemblyDefinition.ReadAssembly(args.Length>1 ? args[1] : ".refs/game/Assembly-CSharp.dll");
  foreach(var capability in Sevo.Framework.Runtime.ContractAudit.Evaluate(current.MainModule).Values)
   Console.WriteLine($"{capability.Name}: {capability.Available}; {capability.Reason}");
+ var functional=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(current.MainModule);
+ Console.WriteLine($"{functional.Name}: {functional.Available}; {functional.Reason}");
+ var eventGate=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(current.MainModule);
+ Console.WriteLine($"{eventGate.Name}: {eventGate.Available}; {eventGate.Reason}");
  var limits=Sevo.Framework.Runtime.ContractAudit.ReadLimits(current.MainModule);
  Console.WriteLine($"Safe brick bound={limits.SafeBrickCapacity}; packed={limits.PackedCapacity}; properties={limits.BrickPropertiesCapacity}; collider primary={limits.ColliderPrimaryCapacity}; collider data={limits.ColliderDataCapacity}; shape templates={limits.ShapeCapacity}");
  Console.WriteLine("Diagnostic MVID="+current.MainModule.Mvid+"; no identity gate");
@@ -46,8 +50,48 @@ Reject(()=>ContentAllocator.FromJson("{broken",8,new[]{0,1},Array.Empty<int>()),
 Reject(()=>ContentAllocator.FromJson(json.Replace("\"id\":3","\"id\":2"),8,new[]{0,1},Array.Empty<int>()),"duplicate persisted ID");
 Reject(()=>a.Apply(new[]{R("invalid:a")}),"invalid namespace");
 var game = AssemblyDefinition.ReadAssembly(".refs/game/Assembly-CSharp.dll");
+using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtime.ContractAudit).Assembly.Location))
+{
+ var registrations=framework.MainModule.GetType("Sevo.Framework.Runtime.ContentRegistration").Methods;
+ Check(registrations.Count(method=>method.IsPublic && method.Name.StartsWith("RegisterFunctional",StringComparison.Ordinal))==1
+  && registrations.Any(method=>method.IsPublic && method.Name=="RegisterFunctionalBlock"
+   && method.Parameters.Any(parameter=>parameter.ParameterType.FullName=="System.Func`1<VoxelEngine.Brick>")),
+  "functional registration exposes one caller-selected template API");
+ Check(framework.MainModule.GetType("Sevo.Framework.Runtime.StockRepairBeam")==null,
+  "the framework must not contain the sample's template policy");
+}
 var results = Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(results["packedIds"].Available && results["lifecycle"].Available,"current game contracts");
+var hullField=game.MainModule.GetType("VoxelEngine.TabHull").Fields.Single(field=>field.Name=="HULL_A");
+hullField.Name="UnavailableHull";
+var withoutLegacyHull=Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
+Check(!withoutLegacyHull["stockHull"].Available && withoutLegacyHull["lifecycle"].Available
+ && withoutLegacyHull["stockTemplateMaterials"].Available
+ && Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available,
+ "legacy hull availability is independent of generic functional registration");
+hullField.Name="HULL_A";
+var glowField=game.MainModule.GetType("VoxelEngine.Brick").Fields.Single(field=>field.Name=="hasGlowPaint");
+glowField.Name="UnavailableGlowPaint";
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule).Values.All(result=>result.Available),
+ "a changed template layout disables functional blocks before native registration");
+glowField.Name="hasGlowPaint";
+var functionalResult=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule);
+Check(functionalResult.Available,"current functional command contracts: "+functionalResult.Reason);
+var eventGateResult=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule);
+Check(eventGateResult.Available,"current held Event Gate contracts: "+eventGateResult.Reason);
+var gateBinding=game.MainModule.GetType("VoxelEngine.CommandEventGate").Methods.Single(method=>method.Name=="SetStateData");
+gateBinding.Name="UnsupportedStateBinding";
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available,
+ "incompatible Event Gate reset only disables held Event Gate input");
+gateBinding.Name="SetStateData";
+var switchActivation=game.MainModule.GetType("VoxelEngine.CommandSwitch").Methods.Single(method=>method.Name=="Activate");
+switchActivation.Name="UnsupportedActivate";
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule).Values.All(result=>result.Available),
+ "incompatible switch only disables functional commands");
+switchActivation.Name="Activate";
 var lifecycleAwake=game.MainModule.GetType("ResourcesLoader").Methods.Single(x=>x.Name=="Awake");
 var brickCall=lifecycleAwake.Body.Instructions.First(x=>x.Operand is MethodReference m && m.DeclaringType.FullName=="VoxelEngine.Brick" && m.Name=="LoadAllResourcesRuntime");
 var allocatorCall=lifecycleAwake.Body.Instructions.First(x=>x.Operand is MethodReference m && m.DeclaringType.FullName=="Manager.GameResourcesManager" && m.Name=="AllocateResources");
@@ -56,6 +100,8 @@ Check(!Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule)["lifecycle
 (brickCall.Operand,allocatorCall.Operand)=(allocatorCall.Operand,brickCall.Operand);
 game.MainModule.Mvid=Guid.NewGuid();
 Check(Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule)["packedIds"].Available,"identity must not gate packed IDs");
+Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available,"identity must not gate functional commands");
+Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available,"identity must not gate Event Gate input");
 var mask=game.MainModule.GetType("VoxelEngine.BrickIndex").Fields.Single(x=>x.Name=="BRICK_MASK"); var originalMask=mask.Constant; mask.Constant=Convert.ToInt32(originalMask)/2;
 var altered=Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(!altered["packedIds"].Available && altered["lifecycle"].Available,"packed mask failure isolated");
@@ -82,4 +128,5 @@ try {
 } finally { Directory.Delete(temp,true); }
 checks += ExpandedTests.Run();
 checks += RegistrationTests.Run();
+checks += FunctionalLifetimeTests.Run();
 Console.WriteLine($"{checks} checks passed");

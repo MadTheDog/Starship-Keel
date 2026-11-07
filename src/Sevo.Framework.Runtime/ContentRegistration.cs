@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using Sevo.Framework.Sdk;
+using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
@@ -11,8 +12,10 @@ namespace Sevo.Framework.Runtime
         public string Key { get; }
         public int Revision { get; }
         internal Func<int,object> Factory { get; }
-        internal ContentDefinition(string key,int revision,Func<int,object> factory)
-        { Key=key; Revision=revision; Factory=factory; }
+        internal Func<string?>? PrepareTemplate { get; }
+        internal bool IsFunctional => PrepareTemplate!=null;
+        internal ContentDefinition(string key,int revision,Func<int,object> factory,Func<string?>? prepareTemplate)
+        { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; }
     }
 
     public sealed class RegistrationCatalog
@@ -21,6 +24,9 @@ namespace Sevo.Framework.Runtime
         private readonly Dictionary<string,ContentDefinition> definitions = new Dictionary<string,ContentDefinition>(StringComparer.Ordinal);
         private bool sealedCatalog;
         public void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory)
+            => Register(ownerId,localName,revision,brickFactory,null);
+
+        internal void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory,Func<string?>? prepareTemplate)
         {
             var key=ownerId+":"+localName;
             ContentAllocator.ValidateKey(key);
@@ -29,7 +35,7 @@ namespace Sevo.Framework.Runtime
             {
                 if(sealedCatalog) throw new InvalidOperationException("Registration collection is closed; restart required.");
                 if(definitions.ContainsKey(key)) throw new InvalidOperationException("Duplicate content key: "+key);
-                definitions.Add(key,new ContentDefinition(key,revision,brickFactory));
+                definitions.Add(key,new ContentDefinition(key,revision,brickFactory,prepareTemplate));
             }
         }
         public IReadOnlyList<ContentDefinition> Seal()
@@ -48,6 +54,23 @@ namespace Sevo.Framework.Runtime
         internal static RegistrationCatalog Catalog { get; } = new RegistrationCatalog();
         public static void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory)
             => Catalog.Register(ownerId,localName,revision,brickFactory);
+
+        /// <summary>Declares a functional block using geometry from a mod-selected native template.</summary>
+        /// <param name="selectTemplate">Read-only selector invoked after native brick resources are loaded.</param>
+        public static void RegisterFunctionalBlock(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory)
+        {
+            if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.",nameof(displayName));
+            if (selectTemplate==null) throw new ArgumentNullException(nameof(selectTemplate));
+            if (behaviorFactory==null) throw new ArgumentNullException(nameof(behaviorFactory));
+            var key=ownerId+":"+localName;
+            FunctionalStockTemplate? template=null;
+            Catalog.Register(ownerId,localName,revision,id=>
+            {
+                var binding=new FunctionalBinding(key,id,behaviorFactory);
+                return (template ?? throw new InvalidOperationException("Functional template was not prepared.")).Create(id,displayName,binding);
+            },()=>FunctionalStockTemplate.TryPrepare(selectTemplate(),out template,out var reason) ? null : reason);
+        }
     }
 
     public interface INativeRegistry
@@ -56,6 +79,11 @@ namespace Sevo.Framework.Runtime
         object? Read(int id);
         int IdOf(object definition);
         bool IsSupported(object definition);
+    }
+
+    internal interface IFunctionalNativeRegistry
+    {
+        bool IsSupportedFunctional(object definition);
     }
 
     /// <summary>Checks cooperating factories. It cannot sandbox arbitrary plugin code or reverse native side effects.</summary>
@@ -85,13 +113,16 @@ namespace Sevo.Framework.Runtime
                     var before=Enumerable.Range(0,registry.Capacity).Select(registry.Read).ToArray();
                     if(before[id]!=null) throw new InvalidOperationException("Native slot changed before factory: "+definition.Key);
                     var value=definition.Factory(id);
-                    if(value==null || !registry.IsSupported(value) || registry.IdOf(value)!=id || !ReferenceEquals(registry.Read(id),value))
-                        throw new InvalidOperationException("Factory did not register the expected ordinary brick: "+definition.Key);
+                    bool supported=value!=null && (definition.IsFunctional
+                        ? registry is IFunctionalNativeRegistry commands && commands.IsSupportedFunctional(value)
+                        : registry.IsSupported(value));
+                    if(!supported || registry.IdOf(value!)!=id || !ReferenceEquals(registry.Read(id),value))
+                        throw new InvalidOperationException("Factory did not register the expected stock brick: "+definition.Key);
                     if(registry.Capacity!=before.Length) throw new InvalidOperationException("Factory replaced the native registry capacity.");
                     for(int index=0;index<before.Length;index++)
                         if(index!=id && !ReferenceEquals(before[index],registry.Read(index)))
                             throw new InvalidOperationException("Factory changed an unreserved native slot: "+index);
-                    owned.Add(id,value);
+                    owned.Add(id,value!);
                 }
                 VerifyOwnership();
             }

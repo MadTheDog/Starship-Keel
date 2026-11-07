@@ -8,7 +8,7 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
-    internal sealed class GameAdapter : INativeRegistry
+    internal sealed class GameAdapter : INativeRegistry, IFunctionalNativeRegistry
     {
         private Brick[]? originalTable;
         public int Capacity => Table.Length;
@@ -26,8 +26,23 @@ namespace Sevo.Framework.Runtime
         public int IdOf(object definition) => ((Brick)definition).brickID;
         public bool IsSupported(object definition)
         {
-            // This milestone deliberately excludes command bricks, custom subclasses and composite shapes.
-            return definition.GetType()==typeof(Brick) && !((Brick)definition).IsCommand && ((Brick)definition).SubShapes==null;
+            return definition.GetType()==typeof(Brick) && !((Brick)definition).IsCommand
+                && StockTemplateResources.IsSupported((Brick)definition,StockShape.HullTemplate(),legacyHull:true);
+        }
+        public bool IsSupportedFunctional(object definition) =>
+            definition is Brick brick && FunctionalStockTemplate.IsSupported(brick);
+
+        public static bool IsStockHullAvailable(out string reason) =>
+            StockTemplateResources.IsTemplateAvailable(TabHull.HULL_A,out reason);
+
+        public void InitializeManagedResources(NativeRegistrationSession session)
+        {
+            session.VerifyOwnership();
+            foreach (Brick brick in session.Owned.Values)
+            {
+                if (brick.IsCommand) FunctionalStockTemplate.Load(brick);
+                else StockTemplateResources.Load(brick,StockShape.HullTemplate(),legacyHull:true);
+            }
         }
         public ResourceSpace[] AllocationSpaces(NativeLimits limits)
         {
@@ -90,23 +105,32 @@ namespace Sevo.Framework.Runtime
     {
         public static object CreateHull(int id,string displayName)
         {
+            var template=HullTemplate();
+            var brick=new Brick(id,displayName,template.nameMesh,ResizeMode.BlockFull,"Hull/HullA");
+            CopyHullFields(brick,template);
+            brick.Tab(CodexTab.HULL_BLOCKS);
+            return brick;
+        }
+
+        internal static Brick HullTemplate()
+        {
             var template=TabHull.HULL_A ?? throw new InvalidOperationException("Stock hull declaration is unavailable.");
             if(string.IsNullOrWhiteSpace(template.nameMesh) || template.SubShapes!=null)
                 throw new InvalidOperationException("Stock hull is no longer a supported single shape.");
-            var brick=new Brick(id,displayName,template.nameMesh,ResizeMode.BlockFull,"Hull/HullA")
-            {
-                colliderShape=template.colliderShape,
-                systemProfile=template.systemProfile,
-                massForUnitShape=template.massForUnitShape,
-                isDynamicGridSize=template.isDynamicGridSize,
-                minGridSize=template.minGridSize,
-                gridLevel=template.gridLevel,
-                useMaterial=template.useMaterial,
-                canPaint=template.canPaint,
-                defaultPaint=template.defaultPaint
-            };
-            brick.Tab(CodexTab.HULL_BLOCKS);
-            return brick;
+            return template;
+        }
+
+        internal static void CopyHullFields(Brick brick,Brick template)
+        {
+            brick.colliderShape=template.colliderShape;
+            brick.systemProfile=template.systemProfile;
+            brick.massForUnitShape=template.massForUnitShape;
+            brick.isDynamicGridSize=template.isDynamicGridSize;
+            brick.minGridSize=template.minGridSize;
+            brick.gridLevel=template.gridLevel;
+            brick.useMaterial=template.useMaterial;
+            brick.canPaint=template.canPaint;
+            brick.defaultPaint=template.defaultPaint;
         }
     }
 }

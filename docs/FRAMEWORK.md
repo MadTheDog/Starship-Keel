@@ -15,7 +15,7 @@ ContentRegistration.Register("example.alpha", "hull", 1,
 
 The durable identity is `example.alpha:hull`, independent of its display name. The runtime supplies the numeric ID. Content revision1 is an explicit contract; changing it requires migration support, not a silent reassignment. Late or duplicate declarations reject.
 
-The initial native API supports ordinary stock-shape hull definitions. Custom subclasses, command bricks, compound shapes, custom native geometry, world migrations and networked content need additional capabilities. Do not cast this preview as a general Forge/Fabric equivalent yet.
+The original v0.1.0 native API supports ordinary stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected native templates, native placement callbacks, and one sustained logic input. Mods own their block definitions and gameplay. Compound shapes, custom native geometry, world migrations and networked content need additional capabilities.
 
 ## Allocation and persistence
 

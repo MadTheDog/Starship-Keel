@@ -50,6 +50,7 @@ namespace Sevo.Framework.Runtime
         [DataMember(Name="capabilities", Order=18)] public StatusCapability[] Capabilities { get; set; } = Array.Empty<StatusCapability>();
         [DataMember(Name="assemblyMvid", Order=19)] public string AssemblyMvid { get; set; } = "";
         [DataMember(Name="updatedUtc", Order=20)] public string UpdatedUtc { get; internal set; } = "";
+        [DataMember(Name="registeredFunctionalBlocks", Order=21)] public int RegisteredFunctionalBlocks { get; set; }
     }
 
     public static class ProfileProtocol
