@@ -20,7 +20,7 @@ Keel defaults to audit mode. Experimental registration requires an explicit opt-
 
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
-See the [framework API](docs/FRAMEWORK.md) and [examples](samples/README.md).
+See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).
 
 ## Build from source
 
