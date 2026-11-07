@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed the half-bay offset in modular receivers. Centered section meshes, previews, and renderer culling bounds now align with the native bay and socket.
 - Added mod-owned solid colors and albedo textures for custom attachment visuals, with optional colored glow and per-material stock paint.
 - Added independent native placement and item-preview paint defaults for accepted custom visuals. Saved bricks retain their player-applied colors.
 - Added custom receiver host meshes and separately identified repeat meshes. The opt-in modular layout renders one full section at each native repeat position while preserving stock collision, resize rules, and attachment sockets.
