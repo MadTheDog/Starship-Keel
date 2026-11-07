@@ -19,6 +19,10 @@ if(args.Length>0 && args[0]=="audit") {
  Console.WriteLine($"{functional.Name}: {functional.Available}; {functional.Reason}");
  var eventGate=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(current.MainModule);
  Console.WriteLine($"{eventGate.Name}: {eventGate.Available}; {eventGate.Reason}");
+ var attachments=Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(current.MainModule);
+ Console.WriteLine($"{attachments.Name}: {attachments.Available}; {attachments.Reason}");
+ var visuals=Sevo.Framework.Runtime.ContractAudit.EvaluateAttachmentVisuals(current.MainModule);
+ Console.WriteLine($"{visuals.Name}: {visuals.Available}; {visuals.Reason}");
  var limits=Sevo.Framework.Runtime.ContractAudit.ReadLimits(current.MainModule);
  Console.WriteLine($"Safe brick bound={limits.SafeBrickCapacity}; packed={limits.PackedCapacity}; properties={limits.BrickPropertiesCapacity}; collider primary={limits.ColliderPrimaryCapacity}; collider data={limits.ColliderDataCapacity}; shape templates={limits.ShapeCapacity}");
  Console.WriteLine("Diagnostic MVID="+current.MainModule.Mvid+"; no identity gate");
@@ -59,6 +63,15 @@ using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtim
   "functional registration exposes one caller-selected template API");
  Check(framework.MainModule.GetType("Sevo.Framework.Runtime.StockRepairBeam")==null,
   "the framework must not contain the sample's template policy");
+ Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachmentReceiver"
+   && method.Parameters.Select(p=>p.Name).SequenceEqual(new[]{"ownerId","localName","revision","displayName","selectTemplate","compatibleAttachmentKeys","behaviorFactory"}))
+  && registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachment" && method.Parameters.Count==5)
+  && framework.MainModule.GetType("Sevo.Framework.Runtime.WeaponAttachmentSlot").Properties
+     .Select(property=>property.Name).SequenceEqual(new[]{"Index","Slot","AttachmentKey","Attachment"}),
+  "weapon attachment declarations and snapshot preserve their public contract");
+ Check(registrations.Any(method=>method.IsPublic && method.Name=="RegisterWeaponAttachment" && method.Parameters.Count==6
+   && method.Parameters[5].ParameterType.FullName=="System.Func`1<Sevo.Framework.Runtime.WeaponAttachmentVisual>"),
+  "a separate custom visual overload preserves the stock-only attachment API");
 }
 var results = Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(results["packedIds"].Available && results["lifecycle"].Available,"current game contracts");
@@ -80,6 +93,39 @@ var functionalResult=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalComm
 Check(functionalResult.Available,"current functional command contracts: "+functionalResult.Reason);
 var eventGateResult=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule);
 Check(eventGateResult.Available,"current held Event Gate contracts: "+eventGateResult.Reason);
+var attachmentsResult=Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule);
+Check(attachmentsResult.Available,"current native weapon attachment contracts: "+attachmentsResult.Reason);
+var auditVisuals=typeof(Sevo.Framework.Runtime.ContractAudit).GetMethod("EvaluateAttachmentVisuals")
+ ?? throw new Exception("Missing optional attachment visual audit");
+CapabilityResult VisualCapability() => (CapabilityResult)auditVisuals.Invoke(null,new object[]{game.MainModule})!;
+Check(VisualCapability().Available,"current native attachment visual contracts: "+VisualCapability().Reason);
+var voxelMesh=game.MainModule.GetType("VoxelEngine.VoxelMesh");
+var meshField=voxelMesh.Fields.Single(field=>field.Name=="Mesh");
+meshField.Name="ChangedNativeMesh";
+Check(!VisualCapability().Available && Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available,
+ "a changed mesh store disables custom visuals without disabling stock attachments");
+meshField.Name="Mesh";
+var offset=game.MainModule.GetType("VoxelEngine.Offset").Methods.Single(method=>method.Name=="GetFaceOffset" && method.Parameters.Count==2);
+var averagingFactor=offset.Body.Instructions.Single(instruction=>instruction.OpCode==Mono.Cecil.Cil.OpCodes.Ldc_R4);
+var originalAveragingFactor=averagingFactor.Operand;
+averagingFactor.Operand=0.5f;
+Check(!VisualCapability().Available && Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available,
+ "a changed native UV material calculation disables only the optional custom visual path");
+averagingFactor.Operand=originalAveragingFactor;
+var nativeAddonLink=game.MainModule.GetType("VoxelEngine.AddonCommand").Methods.Single(method=>method.Name=="Link");
+nativeAddonLink.Name="UnsupportedLink";
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available,
+ "a changed attachment contract leaves other functional commands and inputs available");
+nativeAddonLink.Name="Link";
+var sideLayout=game.MainModule.GetType("VoxelEngine.SystemWeapon").Methods.Single(method=>method.Name=="SpawnSideAddon");
+var halfGrid=sideLayout.Body.Instructions.First(instruction=>instruction.OpCode==Mono.Cecil.Cil.OpCodes.Ldc_I4_2);
+halfGrid.OpCode=Mono.Cecil.Cil.OpCodes.Ldc_I4_1;
+Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available
+ && Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available,
+ "a changed native slot layout disables attachment registration without gating ordinary functional blocks");
+halfGrid.OpCode=Mono.Cecil.Cil.OpCodes.Ldc_I4_2;
 var gateBinding=game.MainModule.GetType("VoxelEngine.CommandEventGate").Methods.Single(method=>method.Name=="SetStateData");
 gateBinding.Name="UnsupportedStateBinding";
 Check(!Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available
@@ -102,6 +148,8 @@ game.MainModule.Mvid=Guid.NewGuid();
 Check(Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule)["packedIds"].Available,"identity must not gate packed IDs");
 Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(game.MainModule).Available,"identity must not gate functional commands");
 Check(Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(game.MainModule).Available,"identity must not gate Event Gate input");
+Check(Sevo.Framework.Runtime.ContractAudit.EvaluateWeaponAttachments(game.MainModule).Available,"identity must not gate weapon attachments");
+Check(VisualCapability().Available,"identity must not gate attachment visuals");
 var mask=game.MainModule.GetType("VoxelEngine.BrickIndex").Fields.Single(x=>x.Name=="BRICK_MASK"); var originalMask=mask.Constant; mask.Constant=Convert.ToInt32(originalMask)/2;
 var altered=Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(!altered["packedIds"].Available && altered["lifecycle"].Available,"packed mask failure isolated");

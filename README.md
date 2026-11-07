@@ -8,15 +8,15 @@ Starship Keel is a modding framework for Starship EVO. Its SDK assigns persisten
 
 Use this option if Starship EVO already runs with BepInEx 5.4.23.5 on Windows x64 Mono.
 
-1. Close the game and download [Starship-Keel-0.1.2-BepInEx.zip](https://github.com/MadTheDog/Starship-Keel/releases/download/v0.1.2/Starship-Keel-0.1.2-BepInEx.zip).
+1. Close the game and download the `-BepInEx.zip` asset from your chosen [Keel release](https://github.com/MadTheDog/Starship-Keel/releases).
 2. Extract the ZIP into the folder containing `Starship EVO.exe`. Its two DLLs go into `BepInEx/plugins/SevoPlatform`. Keep a single copy of each Keel DLL under `BepInEx/plugins`.
-3. Launch the game through Steam. Check `BepInEx/LogOutput.log` for `Loading [Starship Keel 0.1.2]` and `Mode=audit`.
+3. Launch the game through Steam. Check `BepInEx/LogOutput.log` for the expected Starship Keel version and `Mode=audit`.
 
 This verifies Keel startup with your existing loader. Experimental block registration requires a valid Uplink-managed session and an explicit opt-in. To undo a manual install, close the game and remove the two Keel DLLs you extracted.
 
 ## Current scope
 
-Keel defaults to audit mode. Experimental registration requires an explicit opt-in and a valid Uplink-managed session. The ordinary sample mods demonstrate stock hull registration and persistent IDs. The [functional-block API](docs/KEEL-FUNCTIONAL.md) lets a mod choose a supported native template and receive native Switch or Event Gate input in solo play. Disk persistence, blueprints, custom collision geometry, and multiplayer remain outside the verified release scope.
+Keel defaults to audit mode. Experimental registration requires an explicit opt-in and a valid Uplink-managed session. The ordinary sample mods demonstrate stock hull registration and persistent IDs. The [functional-block API](docs/KEEL-FUNCTIONAL.md) lets a mod choose a supported native template and receive native Switch or Event Gate input in solo play. The [attachment API](docs/KEEL-WEAPON-ATTACHMENTS.md) adds native side slots, separately identified addons, and optional custom render meshes within a stock attachment footprint. Disk persistence, blueprints, custom collision geometry, and multiplayer remain outside the verified scope.
 
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 

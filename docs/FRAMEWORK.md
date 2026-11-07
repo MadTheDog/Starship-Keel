@@ -15,7 +15,7 @@ ContentRegistration.Register("example.alpha", "hull", 1,
 
 The durable identity is `example.alpha:hull`, independent of its display name. The runtime supplies the numeric ID. Content revision1 is an explicit contract; changing it requires migration support, not a silent reassignment. Late or duplicate declarations reject.
 
-The original v0.1.0 native API supports ordinary stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected native templates, native placement callbacks, and one sustained logic input. Mods own their block definitions and gameplay. Compound shapes, custom native geometry, world migrations and networked content need additional capabilities.
+The public v0.1.0 native API supports ordinary stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected native templates, native placement callbacks, and one sustained logic input. Keel 0.1.4 adds [weapon attachment slots](KEEL-WEAPON-ATTACHMENTS.md) for opted-in receivers and separately registered addons, with optional custom visuals within the stock placement contract. Mods own their block definitions, assets, and gameplay. Compound shapes, custom collision, world migrations, and networked content need additional capabilities.
 
 ## Allocation and persistence
 

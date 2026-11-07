@@ -13,10 +13,14 @@ namespace Sevo.Framework.Runtime
         public int Revision { get; }
         internal Func<int,object> Factory { get; }
         internal Func<string?>? PrepareTemplate { get; }
-        internal bool IsFunctional => PrepareTemplate!=null;
-        internal ContentDefinition(string key,int revision,Func<int,object> factory,Func<string?>? prepareTemplate)
-        { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; }
+        internal ContentKind Kind { get; }
+        internal bool IsFunctional => Kind is ContentKind.Functional or ContentKind.AttachmentReceiver;
+        internal bool RequiresWeaponAttachments => Kind is ContentKind.AttachmentReceiver or ContentKind.Attachment;
+        internal ContentDefinition(string key,int revision,Func<int,object> factory,Func<string?>? prepareTemplate,ContentKind kind)
+        { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; Kind=kind; }
     }
+
+    internal enum ContentKind { Ordinary, Functional, AttachmentReceiver, Attachment }
 
     public sealed class RegistrationCatalog
     {
@@ -24,9 +28,10 @@ namespace Sevo.Framework.Runtime
         private readonly Dictionary<string,ContentDefinition> definitions = new Dictionary<string,ContentDefinition>(StringComparer.Ordinal);
         private bool sealedCatalog;
         public void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory)
-            => Register(ownerId,localName,revision,brickFactory,null);
+            => Register(ownerId,localName,revision,brickFactory,null,ContentKind.Ordinary);
 
-        internal void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory,Func<string?>? prepareTemplate)
+        internal void Register(string ownerId,string localName,int revision,Func<int,object> brickFactory,
+            Func<string?>? prepareTemplate,ContentKind kind)
         {
             var key=ownerId+":"+localName;
             ContentAllocator.ValidateKey(key);
@@ -35,7 +40,7 @@ namespace Sevo.Framework.Runtime
             {
                 if(sealedCatalog) throw new InvalidOperationException("Registration collection is closed; restart required.");
                 if(definitions.ContainsKey(key)) throw new InvalidOperationException("Duplicate content key: "+key);
-                definitions.Add(key,new ContentDefinition(key,revision,brickFactory,prepareTemplate));
+                definitions.Add(key,new ContentDefinition(key,revision,brickFactory,prepareTemplate,kind));
             }
         }
         public IReadOnlyList<ContentDefinition> Seal()
@@ -59,17 +64,53 @@ namespace Sevo.Framework.Runtime
         /// <param name="selectTemplate">Read-only selector invoked after native brick resources are loaded.</param>
         public static void RegisterFunctionalBlock(string ownerId,string localName,int revision,string displayName,
             Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory)
+            => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,behaviorFactory,null,ContentKind.Functional);
+
+        /// <summary>Declares a functional receiver using a stock side-slot layout and an explicit set of compatible content keys.</summary>
+        public static void RegisterWeaponAttachmentReceiver(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,IEnumerable<string> compatibleAttachmentKeys,
+            Func<FunctionalBlockContext,FunctionalBlockBehavior> behaviorFactory)
+        {
+            if (compatibleAttachmentKeys==null) throw new ArgumentNullException(nameof(compatibleAttachmentKeys));
+            var keys=compatibleAttachmentKeys.Distinct(StringComparer.Ordinal).ToArray();
+            if(keys.Length==0) throw new ArgumentException("At least one compatible attachment key is required.",nameof(compatibleAttachmentKeys));
+            foreach(var key in keys) ContentAllocator.ValidateKey(key);
+            RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,behaviorFactory,
+                Array.AsReadOnly(keys),ContentKind.AttachmentReceiver);
+        }
+
+        /// <summary>Declares a separately identified native side attachment using mod-selected stock geometry.</summary>
+        public static void RegisterWeaponAttachment(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate)
+            => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,null,null,ContentKind.Attachment);
+
+        /// <summary>Declares an attachment with optional caller-owned geometry and a stock placement and visual fallback.</summary>
+        public static void RegisterWeaponAttachment(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,Func<WeaponAttachmentVisual?> selectVisual)
+            => RegisterPrepared(ownerId,localName,revision,displayName,selectTemplate,null,null,ContentKind.Attachment,
+                selectVisual ?? throw new ArgumentNullException(nameof(selectVisual)));
+
+        private static void RegisterPrepared(string ownerId,string localName,int revision,string displayName,
+            Func<Brick?> selectTemplate,Func<FunctionalBlockContext,FunctionalBlockBehavior>? behaviorFactory,
+            IReadOnlyCollection<string>? compatibleAttachmentKeys,ContentKind kind,Func<WeaponAttachmentVisual?>? selectVisual=null)
         {
             if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.",nameof(displayName));
             if (selectTemplate==null) throw new ArgumentNullException(nameof(selectTemplate));
-            if (behaviorFactory==null) throw new ArgumentNullException(nameof(behaviorFactory));
+            if (kind!=ContentKind.Attachment && behaviorFactory==null) throw new ArgumentNullException(nameof(behaviorFactory));
             var key=ownerId+":"+localName;
             FunctionalStockTemplate? template=null;
             Catalog.Register(ownerId,localName,revision,id=>
             {
-                var binding=new FunctionalBinding(key,id,behaviorFactory);
-                return (template ?? throw new InvalidOperationException("Functional template was not prepared.")).Create(id,displayName,binding);
-            },()=>FunctionalStockTemplate.TryPrepare(selectTemplate(),out template,out var reason) ? null : reason);
+                var prepared=template ?? throw new InvalidOperationException("Native template was not prepared.");
+                if(kind==ContentKind.Attachment) return prepared.CreateAttachment(id,displayName,key);
+                var binding=new FunctionalBinding(key,id,behaviorFactory!,compatibleAttachmentKeys);
+                return prepared.Create(id,displayName,binding);
+            },()=>
+            {
+                if(!FunctionalStockTemplate.TryPrepare(selectTemplate(),kind,out template,out var reason)) return reason;
+                if(selectVisual!=null) template!.PrepareVisual(key,selectVisual);
+                return null;
+            },kind);
         }
     }
 
@@ -83,7 +124,7 @@ namespace Sevo.Framework.Runtime
 
     internal interface IFunctionalNativeRegistry
     {
-        bool IsSupportedFunctional(object definition);
+        bool IsSupportedPrepared(object definition,ContentKind kind);
     }
 
     /// <summary>Checks cooperating factories. It cannot sandbox arbitrary plugin code or reverse native side effects.</summary>
@@ -113,9 +154,9 @@ namespace Sevo.Framework.Runtime
                     var before=Enumerable.Range(0,registry.Capacity).Select(registry.Read).ToArray();
                     if(before[id]!=null) throw new InvalidOperationException("Native slot changed before factory: "+definition.Key);
                     var value=definition.Factory(id);
-                    bool supported=value!=null && (definition.IsFunctional
-                        ? registry is IFunctionalNativeRegistry commands && commands.IsSupportedFunctional(value)
-                        : registry.IsSupported(value));
+                    bool supported=value!=null && (definition.Kind==ContentKind.Ordinary
+                        ? registry.IsSupported(value)
+                        : registry is IFunctionalNativeRegistry templates && templates.IsSupportedPrepared(value,definition.Kind));
                     if(!supported || registry.IdOf(value!)!=id || !ReferenceEquals(registry.Read(id),value))
                         throw new InvalidOperationException("Factory did not register the expected stock brick: "+definition.Key);
                     if(registry.Capacity!=before.Length) throw new InvalidOperationException("Factory replaced the native registry capacity.");

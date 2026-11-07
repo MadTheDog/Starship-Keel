@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx;
 using HarmonyLib;
 using Mono.Cecil;
@@ -9,7 +10,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.2")]
+    [BepInPlugin(Id,"Starship Keel","0.1.4")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -20,6 +21,12 @@ namespace Sevo.Framework.Runtime
         private Harmony? harmony;
         private Harmony? functionalHarmony;
         private Harmony? gateHarmony;
+        private Harmony? attachmentHarmony;
+        private Harmony? attachmentInteractionHarmony;
+        private Harmony? attachmentVisualHarmony;
+        private Assembly? pendingAttachmentGame;
+        private CapabilityResult? pendingAttachmentCapability;
+        private bool awaitingAttachmentInteraction;
         private GameAdapter? adapter;
         private NativeRegistrationSession? registration;
         private NativeLimits? limits;
@@ -51,6 +58,8 @@ namespace Sevo.Framework.Runtime
                 var game=AppDomain.CurrentDomain.GetAssemblies().Single(assembly=>assembly.GetName().Name=="Assembly-CSharp");
                 CapabilityResult functionalCapability;
                 CapabilityResult gateCapability;
+                CapabilityResult attachmentCapability;
+                CapabilityResult visualCapability;
                 using(var metadata=AssemblyDefinition.ReadAssembly(game.Location))
                 {
                     status.AssemblyMvid=metadata.MainModule.Mvid.ToString("D");
@@ -59,6 +68,10 @@ namespace Sevo.Framework.Runtime
                     if(status.ContractsValidated) limits=ContractAudit.ReadLimits(metadata.MainModule);
                     functionalCapability=ContractAudit.EvaluateFunctionalCommands(metadata.MainModule);
                     gateCapability=ContractAudit.EvaluateFunctionalEventGate(metadata.MainModule);
+                    attachmentCapability=ContractAudit.EvaluateWeaponAttachments(metadata.MainModule);
+                    visualCapability=ContractAudit.EvaluateAttachmentVisuals(metadata.MainModule);
+                    if(attachmentCapability.Available && !FunctionalStockTemplate.DiscoverReceiverTemplates(metadata.MainModule))
+                        attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"No native side-slot receiver layout was found.");
                 }
                 foreach(var capability in capabilities.Values)
                     Logger.LogInfo(capability.Name+": "+(capability.Available ? "available — " : "unavailable — ")+capability.Reason);
@@ -68,11 +81,20 @@ namespace Sevo.Framework.Runtime
                 {
                     functionalCapability=InstallFunctionalCommands(game,functionalCapability);
                     if(functionalCapability.Available && gateCapability.Available) gateCapability=InstallEventGate(gateCapability);
+                    if(functionalCapability.Available && attachmentCapability.Available)
+                    {
+                        pendingAttachmentGame=game;
+                        pendingAttachmentCapability=attachmentCapability;
+                    }
                 }
-                status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability})
+                if(!functionalCapability.Available && attachmentCapability.Available)
+                    attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"Shared functional command contracts are unavailable.");
+                status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,visualCapability})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
+                Logger.LogInfo(attachmentCapability.Name+": "+attachmentCapability.Reason);
+                Logger.LogInfo(visualCapability.Name+": "+visualCapability.Reason);
                 if(!Available("lifecycle"))
                 {
                     status.Reason="Audit metadata available; lifecycle observation unavailable.";
@@ -92,6 +114,7 @@ namespace Sevo.Framework.Runtime
             {
                 KeelFunctionalCommand.Enabled=false;
                 FunctionalEventGate.Enabled=false;
+                WeaponAttachmentAvailability.Enabled=false;
                 gateHarmony?.UnpatchSelf();
                 functionalHarmony?.UnpatchSelf();
                 harmony?.UnpatchSelf();
@@ -113,6 +136,31 @@ namespace Sevo.Framework.Runtime
                 return new CapabilityResult(capability.Name,false,"Event Gate hook unavailable: "+exception.Message);
             }
         }
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private CapabilityResult InstallWeaponAttachmentHooks(Assembly game,CapabilityResult capability,bool interaction)
+        {
+            try
+            {
+                var hooks=new Harmony(Id+(interaction ? ".weaponattachments.interaction" : ".weaponattachments"));
+                if(interaction)
+                {
+                    ManagedWeaponAttachmentBrick.InstallInteractionHooks(hooks,game);
+                    attachmentInteractionHarmony=hooks;
+                    WeaponAttachmentAvailability.Enabled=true;
+                }
+                else
+                {
+                    ManagedWeaponAttachmentBrick.InstallCoreHooks(hooks,game);
+                    attachmentHarmony=hooks;
+                }
+                return capability;
+            }
+            catch(Exception exception)
+            {
+                Logger.LogWarning(exception.ToString());
+                return new CapabilityResult(capability.Name,false,"Weapon attachment hooks unavailable: "+exception.Message);
+            }
+        }
         private CapabilityResult InstallFunctionalCommands(Assembly game,CapabilityResult capability)
         {
             try
@@ -130,6 +178,46 @@ namespace Sevo.Framework.Runtime
         }
         internal static void ReportFunctionalFailure(string key,Exception exception) =>
             instance?.Logger.LogError("Functional placement stopped for "+key+". "+exception);
+
+        internal static UnityEngine.Mesh? PrepareAttachmentVisual(string key,VoxelEngine.Brick template,
+            Func<WeaponAttachmentVisual?> selectVisual)
+        {
+            var plugin=instance;
+            if(plugin==null) return null;
+            var report=plugin.status.Capabilities.Single(value=>value.Name=="attachmentVisuals");
+            try
+            {
+                if(!report.Available) throw new InvalidOperationException(report.Reason);
+                var visual=selectVisual();
+                if(visual==null) return null;
+                plugin.EnsureAttachmentVisualHook(report);
+                return AttachmentVisualResources.Prepare(visual,template,key);
+            }
+            catch(Exception exception)
+            {
+                plugin.Logger.LogWarning("Using stock visual for "+key+": "+exception.Message);
+                return null;
+            }
+        }
+
+        private void EnsureAttachmentVisualHook(StatusCapability report)
+        {
+            if(attachmentVisualHarmony!=null) return;
+            var hook=new Harmony(Id+".attachmentvisuals");
+            try
+            {
+                AttachmentVisualResources.Install(hook);
+                attachmentVisualHarmony=hook;
+            }
+            catch(Exception exception)
+            {
+                report.Available=false;
+                report.Reason="Native attachment visual hook unavailable: "+exception.Message;
+                try { hook.UnpatchSelf(); }
+                catch(Exception cleanup) { Logger.LogWarning("Attachment visual hook cleanup failed: "+cleanup.Message); }
+                throw new InvalidOperationException(report.Reason,exception);
+            }
+        }
         private bool Available(string name)=>capabilities.TryGetValue(name,out var result) && result.Available;
         private void Patch(Assembly game,string typeName,string methodName,string? prefix,string? postfix,string? finalizer)
         {
@@ -153,6 +241,10 @@ namespace Sevo.Framework.Runtime
             StopFunctionalCommands();
             KeelFunctionalCommand.Enabled=false;
             FunctionalEventGate.Enabled=false;
+            WeaponAttachmentAvailability.Enabled=false;
+            awaitingAttachmentInteraction=false;
+            pendingAttachmentGame=null;
+            pendingAttachmentCapability=null;
             status.Failed=true; status.RegistrationAdmitted=false; status.ResourcesReady=false; resourceChecksPassed=false;
             status.Reason=reason+": "+exception.Message
                 +(exception.InnerException==null ? "" : " Root cause: "+exception.GetBaseException().Message)
@@ -182,6 +274,13 @@ namespace Sevo.Framework.Runtime
             }
             catch(Exception exception) {plugin.Fail("Brick initialization validation failed",exception); if(plugin.experimental) throw;}
         }
+        private void ReportAttachmentCapability(CapabilityResult result)
+        {
+            var report=status.Capabilities.Single(value=>value.Name==result.Name);
+            report.Available=result.Available;
+            report.Reason=result.Reason;
+            Logger.LogInfo(result.Name+": "+result.Reason);
+        }
         private void AdmitDefinitions()
         {
             var definitions=ContentRegistration.Catalog.Seal();
@@ -190,13 +289,26 @@ namespace Sevo.Framework.Runtime
                 if(definitions.Count>0) Logger.LogInfo("Audit mode: ignored "+definitions.Count+" content factories; no IDs allocated.");
                 return;
             }
-            bool hullAvailable=Available("stockHull") && definitions.Any(definition=>!definition.IsFunctional)
+            if(pendingAttachmentGame!=null && pendingAttachmentCapability!=null)
+            {
+                if(definitions.Any(definition=>definition.RequiresWeaponAttachments))
+                {
+                    var result=InstallWeaponAttachmentHooks(pendingAttachmentGame,pendingAttachmentCapability,interaction:false);
+                    if(!result.Available) ReportAttachmentCapability(result);
+                }
+                if(attachmentHarmony==null)
+                {
+                    pendingAttachmentGame=null;
+                    pendingAttachmentCapability=null;
+                }
+            }
+            bool hullAvailable=Available("stockHull") && definitions.Any(definition=>definition.Kind==ContentKind.Ordinary)
                 && CheckPreset("stockHull",GameAdapter.IsStockHullAvailable);
             var admitted=new List<ContentDefinition>();
             foreach(var definition in definitions)
             {
                 var failure=definition.PrepareTemplate is { } prepare
-                    ? CheckFunctionalTemplate(prepare)
+                    ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null)
                     : hullAvailable ? null : "The legacy stock hull contract is unavailable.";
                 if(failure==null) admitted.Add(definition);
                 else Logger.LogWarning("Skipped "+definition.Key+": "+failure);
@@ -213,9 +325,10 @@ namespace Sevo.Framework.Runtime
             status.RegisteredFunctionalBlocks=admitted.Count(definition=>definition.IsFunctional);
             Logger.LogInfo("Experimental definitions admitted: "+status.RegisteredDefinitions+", functional: "+status.RegisteredFunctionalBlocks);
         }
-        private static string? CheckFunctionalTemplate(Func<string?> prepare)
+        private static string? CheckPreparedTemplate(Func<string?> prepare,bool featureAvailable)
         {
             if(!KeelFunctionalCommand.Enabled) return "Functional commands are unavailable or disabled.";
+            if(!featureAvailable) return "Weapon attachment contracts are unavailable or disabled.";
             try { return prepare(); }
             catch(Exception exception) { return "Native template preparation failed: "+exception.Message; }
         }
@@ -240,6 +353,17 @@ namespace Sevo.Framework.Runtime
         private void Update()
         {
             if(KeelFunctionalCommand.Enabled) KeelFunctionalCommand.StopOutsideSolo();
+            // Wait until the resource loader returns to the player loop. JIT-compiling native interaction
+            // methods can initialize UI and crafting types that require fully allocated game resources.
+            if(awaitingAttachmentInteraction && pendingAttachmentGame!=null && pendingAttachmentCapability!=null)
+            {
+                awaitingAttachmentInteraction=false;
+                var result=InstallWeaponAttachmentHooks(pendingAttachmentGame,pendingAttachmentCapability,interaction:true);
+                pendingAttachmentGame=null;
+                pendingAttachmentCapability=null;
+                ReportAttachmentCapability(result);
+                FinishReadiness();
+            }
         }
         private void OnDestroy()
         {
@@ -247,6 +371,10 @@ namespace Sevo.Framework.Runtime
             StopFunctionalCommands();
             KeelFunctionalCommand.Enabled=false;
             FunctionalEventGate.Enabled=false;
+            WeaponAttachmentAvailability.Enabled=false;
+            attachmentVisualHarmony?.UnpatchSelf();
+            attachmentInteractionHarmony?.UnpatchSelf();
+            attachmentHarmony?.UnpatchSelf();
             instance=null;
         }
         private static void StopFunctionalCommands()
@@ -298,12 +426,21 @@ namespace Sevo.Framework.Runtime
                 if(plugin.experimental) plugin.adapter!.ValidateResources(plugin.registration!,plugin.limits!,true);
             }
             catch(Exception exception) { plugin.Fail("Resource callback changed managed ownership/resources",exception); if(plugin.experimental) throw; return; }
-            plugin.status.ResourcesReady=plugin.resourceChecksPassed && !plugin.status.Failed;
-            plugin.status.Reason=plugin.status.ResourcesReady
-                ? "Native resource callback completed. "+(plugin.experimental ? "Experimental owned registrations validated." : "Audit-only observation; no content IDs allocated.")+" World/blueprint admission is not established."
+            if(plugin.resourceChecksPassed && plugin.pendingAttachmentGame!=null)
+            {
+                plugin.awaitingAttachmentInteraction=true;
+                return;
+            }
+            plugin.FinishReadiness();
+        }
+        private void FinishReadiness()
+        {
+            status.ResourcesReady=resourceChecksPassed && !status.Failed;
+            status.Reason=status.ResourcesReady
+                ? "Native resource callback completed. "+(experimental ? "Experimental owned registrations validated." : "Audit-only observation; no content IDs allocated.")+" World/blueprint admission is not established."
                 : "Native resource observation incomplete; inspect capabilities and failure reason.";
-            plugin.Logger.LogInfo(plugin.status.Reason+" Bricks="+plugin.status.OccupiedBricks+"/"+plugin.status.BrickCapacity+"; shapes="+plugin.status.OccupiedShapes+"/"+plugin.status.ShapeCapacity);
-            plugin.Publish();
+            Logger.LogInfo(status.Reason+" Bricks="+status.OccupiedBricks+"/"+status.BrickCapacity+"; shapes="+status.OccupiedShapes+"/"+status.ShapeCapacity);
+            Publish();
         }
         private static Exception? NativeFinalizer(Exception? __exception)
         {

@@ -29,8 +29,8 @@ namespace Sevo.Framework.Runtime
             return definition.GetType()==typeof(Brick) && !((Brick)definition).IsCommand
                 && StockTemplateResources.IsSupported((Brick)definition,StockShape.HullTemplate(),legacyHull:true);
         }
-        public bool IsSupportedFunctional(object definition) =>
-            definition is Brick brick && FunctionalStockTemplate.IsSupported(brick);
+        public bool IsSupportedPrepared(object definition,ContentKind kind) =>
+            definition is Brick brick && FunctionalStockTemplate.IsSupported(brick,kind);
 
         public static bool IsStockHullAvailable(out string reason) =>
             StockTemplateResources.IsTemplateAvailable(TabHull.HULL_A,out reason);
@@ -40,8 +40,8 @@ namespace Sevo.Framework.Runtime
             session.VerifyOwnership();
             foreach (Brick brick in session.Owned.Values)
             {
-                if (brick.IsCommand) FunctionalStockTemplate.Load(brick);
-                else StockTemplateResources.Load(brick,StockShape.HullTemplate(),legacyHull:true);
+                if (!FunctionalStockTemplate.TryLoad(brick))
+                    StockTemplateResources.Load(brick,StockShape.HullTemplate(),legacyHull:true);
             }
         }
         public ResourceSpace[] AllocationSpaces(NativeLimits limits)

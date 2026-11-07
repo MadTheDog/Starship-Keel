@@ -11,11 +11,11 @@ namespace Sevo.Framework.Runtime
     /// <summary>A single live native placement. Keep the context only for this placement's lifetime.</summary>
     public sealed class FunctionalBlockContext
     {
-        private KeelFunctionalCommand? command;
+        private FunctionalCommandState? state;
 
-        internal FunctionalBlockContext(KeelFunctionalCommand command, FunctionalBinding binding)
+        internal FunctionalBlockContext(FunctionalCommandState state, FunctionalBinding binding)
         {
-            this.command = command;
+            this.state = state;
             Key = binding.Key;
             ContentId = binding.Id;
         }
@@ -26,88 +26,72 @@ namespace Sevo.Framework.Runtime
         /// <summary>Gets the current native placement on the game thread while it remains usable in solo play.</summary>
         public bool TryGetPlacement(out BrickCoord placement)
         {
-            if (command?.CanRun == true)
+            if (state?.CanRun == true)
             {
-                placement = command.brickCoord;
+                placement = state.Command.brickCoord;
                 return true;
             }
             placement = default;
             return false;
         }
 
-        internal void Invalidate() => command = null;
+        /// <summary>Reads the current native weapon side slots for this placement on the game thread.</summary>
+        public IReadOnlyList<WeaponAttachmentSlot> GetWeaponAttachmentSlots() =>
+            state?.GetAttachmentSlots() ?? Array.Empty<WeaponAttachmentSlot>();
+
+        internal void Invalidate() => state = null;
     }
 
     internal sealed class FunctionalBinding
     {
-        public FunctionalBinding(string key, int id, Func<FunctionalBlockContext, FunctionalBlockBehavior> factory)
+        public FunctionalBinding(string key, int id, Func<FunctionalBlockContext, FunctionalBlockBehavior> factory,
+            IReadOnlyCollection<string>? compatibleAttachmentKeys = null)
         {
             Key = key;
             Id = id;
             Factory = factory;
+            CompatibleAttachmentKeys = compatibleAttachmentKeys;
         }
 
         public string Key { get; }
         public int Id { get; }
         public Func<FunctionalBlockContext, FunctionalBlockBehavior> Factory { get; }
+        public IReadOnlyCollection<string>? CompatibleAttachmentKeys { get; }
+    }
+
+    internal interface IFunctionalCommand
+    {
+        FunctionalCommandState FunctionalState { get; }
+    }
+
+    internal static class WeaponAttachmentAvailability
+    {
+        internal static bool Enabled { get; set; }
     }
 
     /// <summary>Native command implementation constructed by the game. Register through ContentRegistration.</summary>
-    public sealed class KeelFunctionalCommand : Command, ICommandOnEntityInitializedCallback
+    public sealed class KeelFunctionalCommand : Command, ICommandOnEntityInitializedCallback, IFunctionalCommand
     {
         internal static bool Enabled { get; set; }
-        private static readonly HashSet<KeelFunctionalCommand> Live = new HashSet<KeelFunctionalCommand>();
-        private FunctionalBinding? binding;
-        private FunctionalBlockContext? context;
-        private FunctionalBlockLifetime<FunctionalBlockContext>? lifetime;
-        private bool fromLoad;
-        private bool gateWaitingForLow;
+        private FunctionalCommandState FunctionalState { get; }
+        FunctionalCommandState IFunctionalCommand.FunctionalState => FunctionalState;
 
-        internal bool CanRun
-        {
-            get
-            {
-                if (!Enabled || IsRemoved || !IsSolo) return false;
-                var parent = parentEntity;
-                return parent != null && parent.IsInitialized && !parent.WillBeUnspawned;
-            }
-        }
-
-        private static bool IsSolo => PlayerState.sessionMode == PlayerState.SessionMode.solo;
+        public KeelFunctionalCommand() => FunctionalState = new FunctionalCommandState(this);
         public override bool CanBeLinkSource => false;
         public override bool CanBeLinkTarget => true;
         public override bool AllowMultipleInputs => false;
         public override bool CanActivateManually(PlayerCommandManager playerManager) => false;
         public override bool CanBeLinkTargetFromCommand(ICommand predecessor) =>
-            predecessor != null && (predecessor.GetType() == typeof(CommandSwitch) || FunctionalEventGate.IsSource(predecessor));
+            FunctionalCommandState.SupportsSource(predecessor);
 
         protected override void OnInitialize(BrickIds ids, bool onLoad, object[] args)
         {
-            Stop();
+            FunctionalState.Stop();
             base.OnInitialize(ids, onLoad, args);
-            if (args?.Length == 1 && args[0] is FunctionalBinding value && value.Id == brickCoord.brickData.brickId)
-            {
-                binding = value;
-                fromLoad = onLoad;
-                gateWaitingForLow = onLoad;
-            }
+            FunctionalState.Initialize(onLoad, args);
         }
 
-        public void OnEntityInitialized(bool onLoad)
-        {
-            var definition = binding;
-            if (lifetime != null || definition == null || !CanRun) return;
-            var placement = new FunctionalBlockContext(this, definition);
-            context = placement;
-            var created = new FunctionalBlockLifetime<FunctionalBlockContext>(placement, definition.Factory, exception =>
-            {
-                placement.Invalidate();
-                Plugin.ReportFunctionalFailure(definition.Key, exception);
-            });
-            lifetime = created;
-            Live.Add(this);
-            created.Start(fromLoad);
-        }
+        public void OnEntityInitialized(bool onLoad) => FunctionalState.Start();
 
         // Native Activate also carries pulses and manual actions. Source hooks distinguish held levels.
         public override void Activate(bool manualActivation, PlayerCommandManager playerManager, float state) { }
@@ -115,34 +99,13 @@ namespace Sevo.Framework.Runtime
         public override void OnPredecessorAdded(ICommand predecessor, bool onLoad, bool onInit)
         {
             base.OnPredecessorAdded(predecessor, onLoad, onInit);
-            if(onLoad || onInit) return;
-            if(FunctionalEventGate.IsSource(predecessor)) gateWaitingForLow=false;
-            if(predecessor is CommandSwitch source && source.GetType()==typeof(CommandSwitch))
-                SetInputFrom(source,source.State==1f);
+            FunctionalState.PredecessorAdded(predecessor, onLoad, onInit);
         }
 
         public override void OnPredecessorRemoved(ICommand predecessor)
         {
             base.OnPredecessorRemoved(predecessor);
-            lifetime?.SetSustainedInput(false);
-        }
-
-        private void SetInputFrom(Command source,bool enabled,bool verifiedGateLevel=false)
-        {
-            if (lifetime == null) return;
-            if (!CanRun)
-            {
-                Stop();
-                return;
-            }
-            var links = predecessors;
-            if(links.Count!=1 || !ReferenceEquals(links.Command,source) || source.parentEntity!=parentEntity) return;
-            if(verifiedGateLevel && !source.IsRemoved && gateWaitingForLow)
-            {
-                if(enabled) return;
-                gateWaitingForLow=false;
-            }
-            lifetime.SetSustainedInput(enabled && !source.IsRemoved);
+            FunctionalState.PredecessorRemoved();
         }
 
         internal static void BeforeSwitch(CommandSwitch __instance, out float __state) => __state = __instance.State;
@@ -161,38 +124,135 @@ namespace Sevo.Framework.Runtime
 
         internal static void AfterSwitch(CommandSwitch __instance, float __state)
         {
-            if (!Enabled || !IsSolo || __instance.GetType() != typeof(CommandSwitch)
+            if (!Enabled || !FunctionalCommandState.IsSolo || __instance.GetType() != typeof(CommandSwitch)
                 || __instance.State == __state || (__instance.State != 0f && __instance.State != 1f)) return;
             DeliverInput(__instance,__instance.State==1f);
         }
 
         internal static void DeliverInput(Command source,bool enabled,bool verifiedGateLevel=false)
         {
-            if(!Enabled || !IsSolo || source.targets.Count==0) return;
+            if(!Enabled || !FunctionalCommandState.IsSolo || source.targets.Count==0) return;
             // Snapshot targets before calling a mod, which may change links during its callback.
-            var sinks = new List<KeelFunctionalCommand>();
+            var sinks = new List<FunctionalCommandState>();
             foreach (var link in source.targets.Items)
-                if (link.Command is KeelFunctionalCommand sink) sinks.Add(sink);
+                if (link.Command is IFunctionalCommand sink) sinks.Add(sink.FunctionalState);
             foreach (var sink in sinks) sink.SetInputFrom(source,enabled,verifiedGateLevel);
         }
 
         public override void OnDestroy(BrickUnspawnMode mode)
         {
-            try { Stop(); }
+            try { FunctionalState.Stop(); }
             finally { base.OnDestroy(mode); }
         }
 
         public override void ReleaseResources()
         {
-            try { Stop(); }
+            try { FunctionalState.Stop(); }
             finally { base.ReleaseResources(); }
         }
 
-        private void Stop()
+        internal static void StopAll() => FunctionalCommandState.StopAll();
+
+        internal static void StopOutsideSolo()
+        {
+            if (!FunctionalCommandState.IsSolo) StopAll();
+        }
+    }
+
+    internal sealed class FunctionalCommandState
+    {
+        private static readonly HashSet<FunctionalCommandState> Live = new HashSet<FunctionalCommandState>();
+        private readonly Func<IReadOnlyList<WeaponAttachmentSlot>>? attachmentSlots;
+        private FunctionalBlockContext? context;
+        private FunctionalBlockLifetime<FunctionalBlockContext>? lifetime;
+        private bool fromLoad;
+        private bool gateWaitingForLow;
+
+        internal FunctionalCommandState(Command command, Func<IReadOnlyList<WeaponAttachmentSlot>>? attachmentSlots = null)
+        {
+            Command = command;
+            this.attachmentSlots = attachmentSlots;
+        }
+
+        internal Command Command { get; }
+        internal FunctionalBinding? Binding { get; private set; }
+        internal static bool IsSolo => PlayerState.sessionMode == PlayerState.SessionMode.solo;
+
+        internal bool CanRun
+        {
+            get
+            {
+                if (!KeelFunctionalCommand.Enabled || Command.IsRemoved || !IsSolo ||
+                    attachmentSlots != null && !WeaponAttachmentAvailability.Enabled) return false;
+                var parent = Command.parentEntity;
+                return parent != null && parent.IsInitialized && !parent.WillBeUnspawned;
+            }
+        }
+
+        internal IReadOnlyList<WeaponAttachmentSlot> GetAttachmentSlots() =>
+            attachmentSlots != null && CanRun ? attachmentSlots() : Array.Empty<WeaponAttachmentSlot>();
+
+        internal static bool SupportsSource(ICommand predecessor) =>
+            predecessor != null && (predecessor.GetType() == typeof(CommandSwitch) || FunctionalEventGate.IsSource(predecessor));
+
+        internal void Initialize(bool onLoad, object[] args)
+        {
+            if (args?.Length != 1 || args[0] is not FunctionalBinding binding ||
+                binding.Id != Command.brickCoord.brickData.brickId) return;
+            Binding = binding;
+            fromLoad = onLoad;
+            gateWaitingForLow = onLoad;
+        }
+
+        internal void Start()
+        {
+            var definition = Binding;
+            if (lifetime != null || definition == null || !CanRun) return;
+            var placement = new FunctionalBlockContext(this, definition);
+            context = placement;
+            var created = new FunctionalBlockLifetime<FunctionalBlockContext>(placement, definition.Factory, exception =>
+            {
+                placement.Invalidate();
+                Plugin.ReportFunctionalFailure(definition.Key, exception);
+            });
+            lifetime = created;
+            Live.Add(this);
+            created.Start(fromLoad);
+        }
+
+        internal void PredecessorAdded(ICommand predecessor, bool onLoad, bool onInit)
+        {
+            if (onLoad || onInit) return;
+            if (FunctionalEventGate.IsSource(predecessor)) gateWaitingForLow = false;
+            if (predecessor is CommandSwitch source && source.GetType() == typeof(CommandSwitch))
+                SetInputFrom(source, source.State == 1f);
+        }
+
+        internal void PredecessorRemoved() => lifetime?.SetSustainedInput(false);
+
+        internal void SetInputFrom(Command source, bool enabled, bool verifiedGateLevel = false)
+        {
+            if (lifetime == null) return;
+            if (!CanRun)
+            {
+                Stop();
+                return;
+            }
+            var links = Command.predecessors;
+            if (links.Count != 1 || !ReferenceEquals(links.Command, source) || source.parentEntity != Command.parentEntity) return;
+            if (verifiedGateLevel && !source.IsRemoved && gateWaitingForLow)
+            {
+                if (enabled) return;
+                gateWaitingForLow = false;
+            }
+            lifetime.SetSustainedInput(enabled && !source.IsRemoved);
+        }
+
+        internal void Stop()
         {
             var existing = lifetime;
             lifetime = null;
-            binding = null;
+            Binding = null;
             context?.Invalidate();
             context = null;
             Live.Remove(this);
@@ -201,12 +261,7 @@ namespace Sevo.Framework.Runtime
 
         internal static void StopAll()
         {
-            foreach (var command in new List<KeelFunctionalCommand>(Live)) command.Stop();
-        }
-
-        internal static void StopOutsideSolo()
-        {
-            if (Live.Count != 0 && !IsSolo) StopAll();
+            foreach (var command in new List<FunctionalCommandState>(Live)) command.Stop();
         }
     }
 }
