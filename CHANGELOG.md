@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added named native Codex category selection for managed hulls, functional blocks, receivers, and attachments. The solo lab verified visible entries in Weapons, Construction, and Interior, default-category fallback, and hidden owned repeats.
 - Fixed the half-bay offset in modular receivers. Centered section meshes, previews, and renderer culling bounds now align with the native bay and socket.
 - Added mod-owned solid colors and albedo textures for custom attachment visuals, with optional colored glow and per-material stock paint.
 - Added independent native placement and item-preview paint defaults for accepted custom visuals. Saved bricks retain their player-applied colors.
