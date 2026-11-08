@@ -39,19 +39,34 @@ namespace Sevo.Framework.Runtime
         }
     }
 
-    /// <summary>A readable mesh in local metres with a stock material tint and independent native box collider.</summary>
+    public enum ItemSurfaceMode
+    {
+        StockMaterial,
+        Tinted
+    }
+
+    /// <summary>A readable mesh in local metres with a native surface and independent box collider.</summary>
     public sealed class ItemVisualDefinition
     {
         public Mesh Mesh { get; }
         public Color32 Tint { get; }
         public Bounds ColliderBox { get; }
+        public ItemSurfaceMode Surface { get; }
 
         public ItemVisualDefinition(Mesh mesh, Color32 tint, Bounds colliderBox)
+            : this(mesh, tint, colliderBox, ItemSurfaceMode.StockMaterial)
+        {
+        }
+
+        public ItemVisualDefinition(Mesh mesh, Color32 tint, Bounds colliderBox, ItemSurfaceMode surface)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
+            if (surface != ItemSurfaceMode.StockMaterial && surface != ItemSurfaceMode.Tinted)
+                throw new ArgumentOutOfRangeException(nameof(surface));
             Mesh = mesh;
             Tint = new Color32(tint.r, tint.g, tint.b, 255);
             ColliderBox = colliderBox;
+            Surface = surface;
         }
     }
 

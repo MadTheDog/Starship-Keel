@@ -74,6 +74,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult recipes;
                 CapabilityResult items;
                 CapabilityResult itemVisuals;
+                CapabilityResult tintedItemSurface;
                 CapabilityResult machineRecipes;
                 CapabilityResult gathering;
                 CapabilityResult fluids;
@@ -103,6 +104,7 @@ namespace Sevo.Framework.Runtime
                     recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
                     items = ContractAudit.EvaluateItems(metadata.MainModule);
                     itemVisuals = ContractAudit.EvaluateItemVisuals(metadata.MainModule);
+                    tintedItemSurface = ContractAudit.EvaluateTintedItemSurface(metadata.MainModule);
                     machineRecipes = ContractAudit.EvaluateMachineRecipes(metadata.MainModule);
                     gathering = ContractAudit.EvaluateGathering(metadata.MainModule);
                     fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
@@ -143,7 +145,11 @@ namespace Sevo.Framework.Runtime
                 if (itemVisuals.Available && !items.Available)
                     itemVisuals = new CapabilityResult(itemVisuals.Name, false, "Requires the item registration hook.");
                 itemVisuals = InstallContentHook(itemVisuals, "EnableItemVisuals", "ITEM_VISUALS",
-                    () => InstallContentHookPatches(itemVisuals, ItemVisualResources.Install, ItemVisualResources.Disable));
+                    () => InstallContentHookPatches(itemVisuals, patches =>
+                        ItemVisualResources.Install(patches, tintedItemSurface.Available), ItemVisualResources.Disable));
+                if (tintedItemSurface.Available && !itemVisuals.Available)
+                    tintedItemSurface = new CapabilityResult(tintedItemSurface.Name, false, "Requires the item visuals hook.");
+                Logger.LogInfo(tintedItemSurface.Name + ": " + tintedItemSurface.Reason);
                 machineRecipes = InstallContentHook(machineRecipes, "EnableMachineRecipes", "MACHINE_RECIPES",
                     () => InstallContentHookPatches(machineRecipes,
                         patches => MachineRecipeResources.Install(patches, message => Logger.LogWarning(message)),
@@ -179,7 +185,7 @@ namespace Sevo.Framework.Runtime
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, items, itemVisuals, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
+                    codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

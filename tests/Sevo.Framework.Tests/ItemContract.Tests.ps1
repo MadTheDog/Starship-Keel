@@ -9,6 +9,8 @@ $audit = $runtime.GetType('Sevo.Framework.Runtime.ContractAudit').GetMethod('Eva
 if ($null -eq $audit) { throw 'FAIL: native item contract capability is missing.' }
 $visualAudit = $runtime.GetType('Sevo.Framework.Runtime.ContractAudit').GetMethod('EvaluateItemVisuals')
 if ($null -eq $visualAudit) { throw 'FAIL: item representation contract capability is missing.' }
+$surfaceAudit = $runtime.GetType('Sevo.Framework.Runtime.ContractAudit').GetMethod('EvaluateTintedItemSurface')
+if ($null -eq $surfaceAudit) { throw 'FAIL: tinted item surface contract capability is missing.' }
 
 $assembly = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $Root '.refs/game/Assembly-CSharp.dll'))
 try {
@@ -76,4 +78,17 @@ try {
     Assert-VisualCapability $false 'native GPU vertex layout changed'
     $packedNormal.Name = 'normal'
     Assert-VisualCapability $true 'restored item representation contracts'
+
+    $surface = $surfaceAudit.Invoke($null, @($module))
+    if (!$surface.Available) { throw "FAIL: stock tinted material and unrelated MVID -- $($surface.Reason)" }
+    $rockMode = $module.GetType('Game.WorldPropRenderType').Fields | Where-Object Name -eq 'rock'
+    $originalMode = $rockMode.Constant
+    $rockMode.Constant = 91
+    $surface = $surfaceAudit.Invoke($null, @($module))
+    if ($surface.Available) { throw 'FAIL: changed native material code was admitted.' }
+    Assert-VisualCapability $true 'material drift leaves stock-backed item visuals available'
+    $rockMode.Constant = $originalMode
+    $surface = $surfaceAudit.Invoke($null, @($module))
+    if (!$surface.Available) { throw "FAIL: restored tinted material -- $($surface.Reason)" }
+    Write-Output 'PASS: tinted item material admits the matching shader contract only'
 } finally { $assembly.Dispose() }

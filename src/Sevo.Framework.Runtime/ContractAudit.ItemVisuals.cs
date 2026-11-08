@@ -62,5 +62,34 @@ namespace Sevo.Framework.Runtime
             caller.Body.Instructions.Count(instruction => (instruction.OpCode.Code == Code.Call
                 || instruction.OpCode.Code == Code.Callvirt) && instruction.Operand is MethodReference called
                 && called.FullName == target.FullName) == 1;
+
+        public static CapabilityResult EvaluateTintedItemSurface(ModuleDefinition module)
+        {
+            const string capability = "tintedItemSurface";
+            try
+            {
+                if (!EnumCode(module, "Game.WorldPropRenderType", "rock", 0)
+                    || !EnumCode(module, "VoxelEngine.WorldItemShaderPass", "deferred", 0)
+                    || !EnumCode(module, "VoxelEngine.WorldItemShaderPass", "forward", 1))
+                    throw new InvalidOperationException("Native tinted surface or shader pass codes changed.");
+                var render = RequireItemMethod(module, ItemDataType, "SetRenderData", false, "System.Void",
+                    "VoxelEngine.EvoRenderer", "System.Single", "System.Int32", "System.Boolean");
+                var draw = module.GetType("VoxelEngine.EvoRenderer/DrawPass")?.Methods.SingleOrDefault(method =>
+                    method.Name == "DrawWorldItem" && method.HasBody);
+                if (!ItemFieldAccess(render, ItemDataType, "color") || !ItemFieldAccess(render, ItemDataType, "colorSec")
+                    || draw == null || !ItemFieldAccess(draw, "Manager.AssetRepoStarSystem", "Mat_WorldItem"))
+                    throw new InvalidOperationException("Native item tint channels or world-item shader binding changed.");
+                return new CapabilityResult(capability, true, "Opaque native rock material and item tint channels validated.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
+        private static bool EnumCode(ModuleDefinition module, string type, string member, int value) =>
+            module.GetType(type) is { IsEnum: true } definition
+            && definition.Fields.Any(field => field.Name == member && field.HasConstant
+                && Convert.ToInt32(field.Constant) == value);
     }
 }

@@ -27,18 +27,22 @@ namespace Sevo.Example.ItemProbe
         private bool checkedRoundTrip;
         private bool checkedRecipes;
         private bool visualProbe;
+        private bool surfaceProbe;
         private static readonly Color32 ProbeTint = new Color32(245, 62, 140, 255);
+        private static readonly Color32 AlternateTint = new Color32(28, 90, 240, 255);
         private static readonly Bounds ProbeBox = new Bounds(new Vector3(0.04f, 0, 0),
             new Vector3(0.16f, 0.18f, 0.20f));
 
         private void Awake()
         {
             visualProbe = Environment.GetEnvironmentVariable("SEVO_KEEL_ITEM_VISUAL_PROBE") == "1";
+            surfaceProbe = visualProbe && Environment.GetEnvironmentVariable("SEVO_KEEL_ITEM_SURFACE_PROBE") == "1";
             ItemRegistration.Register(Owner, "dust", 1, () =>
                 new ItemDefinition(StockTemplate, "Probe Dust", "A custom part for testing Keel item registration.",
-                    visualProbe ? CreateVisual() : null));
+                    visualProbe ? CreateVisual(ProbeTint, surfaceProbe) : null));
             ItemRegistration.Register(Owner, "grit", 1, () =>
-                new ItemDefinition(StockTemplate, "Probe Grit", "A second item sharing the dust's stock template."));
+                new ItemDefinition(StockTemplate, "Probe Grit", "A second item sharing the dust's stock template.",
+                    surfaceProbe ? CreateVisual(AlternateTint, true) : null));
             RecipeRegistration.Register(Owner, "make_dust", 1, () =>
                 new RecipeDefinition(CraftingLevel.player, 3f, RequireElement(DustKey, 3f), new CraftingElement(StockTemplate, 1f)));
             RecipeRegistration.Register(Owner, "use_dust", 1, () =>
@@ -98,7 +102,12 @@ namespace Sevo.Example.ItemProbe
                 return;
 
             checkedRoundTrip = true;
-            if (visualProbe) VerifyVisual(dust);
+            if (visualProbe) VerifyVisual(dust, ProbeTint);
+            if (surfaceProbe)
+            {
+                VerifyVisual(grit, AlternateTint);
+                VerifySurfacePixels(dust, grit);
+            }
             var raw = dust.SaveData;
             var saved = MessagePackSerializer.Deserialize<ItemSaveData>(MessagePackSerializer.Serialize(raw));
             var identity = saved.data == null ? Array.Empty<string>() : Encoding.UTF8.GetString(saved.data).Split('\0');
@@ -132,7 +141,7 @@ namespace Sevo.Example.ItemProbe
             Logger.LogInfo($"KEEL_ITEM_LOAD PASS dust={dust.prefabId} grit={grit.prefabId}");
         }
 
-        private static ItemVisualDefinition CreateVisual()
+        private static ItemVisualDefinition CreateVisual(Color32 tint, bool neutral)
         {
             var mesh = new Mesh { name = "Keel probe component" };
             mesh.vertices = new[] { new Vector3(-0.23f, -0.09f, -0.12f), new Vector3(0.23f, -0.09f, -0.12f),
@@ -141,10 +150,11 @@ namespace Sevo.Example.ItemProbe
             mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.up, new Vector2(0.5f, 0.5f) };
             mesh.RecalculateNormals();
             mesh.RecalculateTangents();
-            return new ItemVisualDefinition(mesh, ProbeTint, ProbeBox);
+            return new ItemVisualDefinition(mesh, tint, ProbeBox,
+                neutral ? ItemSurfaceMode.Tinted : ItemSurfaceMode.StockMaterial);
         }
 
-        private void VerifyVisual(ItemInstanceData item)
+        private void VerifyVisual(ItemInstanceData item, Color32 tint)
         {
             var native = ItemInstanceRenderResources.PrefabDatas[item.prefabId];
             var stock = ItemInstanceRenderResources.PrefabDatas[(int)StockTemplate];
@@ -166,7 +176,7 @@ namespace Sevo.Example.ItemProbe
                     || (colliderBox.center - ProbeBox.center).sqrMagnitude > 0.000001f
                     || (colliderBox.size - ProbeBox.size).sqrMagnitude > 0.000001f)
                     throw new InvalidOperationException("Native dropped item did not allocate its independent box and rigidbody.");
-                VerifyRender(GlobalRenderer.renderer, item.renderId1, native.renderData.clusterStart);
+                VerifyRender(GlobalRenderer.renderer, item.renderId1, native.renderData.clusterStart, tint);
 
                 previewObject = new GameObject("Keel native item preview probe");
                 var preview = previewObject.AddComponent<ItemPreview>();
@@ -174,7 +184,7 @@ namespace Sevo.Example.ItemProbe
                 const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
                 var renderer = (EvoRenderer)typeof(ItemPreview).GetField("evoRenderer", flags)!.GetValue(preview)!;
                 var previewItem = (ItemInstanceData)typeof(ItemPreview).GetField("previewItemData", flags)!.GetValue(preview)!;
-                VerifyRender(renderer, previewItem.renderId1, native.renderData.clusterStart);
+                VerifyRender(renderer, previewItem.renderId1, native.renderData.clusterStart, tint);
                 preview.SetNewItem(null!);
             }
             finally
@@ -184,7 +194,52 @@ namespace Sevo.Example.ItemProbe
                 item.ReleaseComponentsAndItemId(unlinkTerrain: false);
             }
             Logger.LogInfo($"KEEL_ITEM_VISUAL PASS prefab={item.prefabId} cluster={native.renderData.clusterStart} box={ProbeBox.size}");
-            VerifyInventoryIcon(item.prefabId);
+            if (!surfaceProbe) VerifyInventoryIcon(item.prefabId);
+        }
+
+        private void VerifySurfacePixels(ItemInstanceData first, ItemInstanceData second)
+        {
+            var a = CaptureSlot(first);
+            var b = CaptureSlot(second);
+            int visible = 0;
+            int contrast = 0;
+            int changed = 0;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i].r + a[i].g + a[i].b < 24 || b[i].r + b[i].g + b[i].b < 24) continue;
+                visible++;
+                if (!a[i].Equals(b[i])) changed++;
+                if (a[i].r > a[i].b + 15 && b[i].b > b[i].r + 15) contrast++;
+            }
+            if (visible < 24 || contrast < Math.Max(16, visible / 5))
+                throw new InvalidOperationException($"Stock inventory colors did not diverge. visible={visible} changed={changed} contrast={contrast}");
+            Logger.LogInfo($"KEEL_ITEM_SURFACE PASS visible={visible} changed={changed} contrasting={contrast}");
+        }
+
+        private static Color32[] CaptureSlot(ItemInstanceData item)
+        {
+            var preview = UI_EntityItemPreview.instance;
+            RenderTexture icon = null!, bloom = null!;
+            preview.MakeTextureIfNecessary(ref icon, ref bloom);
+            var pixels = new Texture2D(icon.width, icon.height, TextureFormat.RGBA32, false);
+            var previous = RenderTexture.active;
+            item.SetRenderData(preview.evoRenderer, 0f, 0, isPreview: true);
+            try
+            {
+                BrickRenderDataResources.PushBufferToGpu();
+                preview.RenderItemToTextures(item.BoundsUnscaled.ToBounds(), icon, bloom, false, false);
+                RenderTexture.active = icon;
+                pixels.ReadPixels(new Rect(0, 0, icon.width, icon.height), 0, 0);
+                return pixels.GetPixels32();
+            }
+            finally
+            {
+                item.ReleaseRenderData(preview.evoRenderer, isMainRender: false);
+                RenderTexture.active = previous;
+                Destroy(pixels);
+                Destroy(icon);
+                Destroy(bloom);
+            }
         }
 
         private void VerifyInventoryIcon(int prefabId)
@@ -211,10 +266,10 @@ namespace Sevo.Example.ItemProbe
             Logger.LogInfo($"KEEL_ITEM_ICON PASS slice={codex.SpriteItemID} opaque={opaque} tinted={tinted}");
         }
 
-        private static void VerifyRender(EvoRenderer renderer, int renderId, int cluster)
+        private static void VerifyRender(EvoRenderer renderer, int renderId, int cluster, Color32 tint)
         {
             var render = renderer.GetElement(renderId);
-            if (render.clusterStart != cluster || ItemInstanceRenderResources.datas[render.dataId].color != ProbeTint.GammaToLinear().Pack())
+            if (render.clusterStart != cluster || ItemInstanceRenderResources.datas[render.dataId].color != tint.GammaToLinear().Pack())
                 throw new InvalidOperationException("Native item renderer did not submit the custom mesh and tint.");
         }
 

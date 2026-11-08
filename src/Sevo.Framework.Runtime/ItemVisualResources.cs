@@ -18,13 +18,16 @@ namespace Sevo.Framework.Runtime
         private const int ClusterVertices = 42;
         private static readonly FieldInfo BufferField =
             AccessTools.DeclaredField(typeof(WorldPropsResources), "propMeshDataBuffer");
-        private static readonly Dictionary<int, Color32> Tints = new Dictionary<int, Color32>();
+        private static readonly Dictionary<int, (Color32 Tint, ItemSurfaceMode Surface)> Tints =
+            new Dictionary<int, (Color32, ItemSurfaceMode)>();
         private static ComputeBuffer? originalBuffer;
         private static ComputeBuffer? expandedBuffer;
+        private static PropMeshData? tintedMaterial;
+        private static bool tintedSupported;
 
         internal static bool Enabled { get; private set; }
 
-        internal static void Install(Harmony harmony)
+        internal static void Install(Harmony harmony, bool allowTinted)
         {
             var render = AccessTools.DeclaredMethod(typeof(ItemInstanceData), nameof(ItemInstanceData.SetRenderData),
                 new[] { typeof(EvoRenderer), typeof(float), typeof(int), typeof(bool) });
@@ -32,6 +35,7 @@ namespace Sevo.Framework.Runtime
                 finalizer: new HarmonyMethod(typeof(ItemVisualResources), nameof(RestoreTint)));
             harmony.Patch(AccessTools.DeclaredMethod(typeof(WorldPropsResources), nameof(WorldPropsResources.OnApplicationQuit)),
                 prefix: new HarmonyMethod(typeof(ItemVisualResources), nameof(ReleaseBuffer)));
+            tintedSupported = allowTinted;
             Enabled = true;
         }
 
@@ -46,6 +50,8 @@ namespace Sevo.Framework.Runtime
             internal readonly Aabb RenderBounds;
             internal readonly Aabb ColliderBounds;
             internal readonly Color32 Tint;
+            internal readonly ItemSurfaceMode Surface;
+            internal readonly PropMeshData? MaterialOverride;
             internal int FirstTriangle = -1;
 
             internal MeshRow(ItemVisualDefinition visual)
@@ -73,6 +79,8 @@ namespace Sevo.Framework.Runtime
                     throw new ArgumentException("Each box collider dimension must be at least 5 mm.");
                 ColliderBounds = new Aabb(box);
                 Tint = visual.Tint;
+                Surface = visual.Surface;
+                if (Surface == ItemSurfaceMode.Tinted) MaterialOverride = ReadTintedMaterial();
 
                 if (Mesh.normals.Count != mesh.vertexCount || Mesh.tangents.Count != mesh.vertexCount
                     || Mesh.uv.Count != mesh.vertexCount)
@@ -98,6 +106,7 @@ namespace Sevo.Framework.Runtime
                 stock.renderData.clusterStartLOD = 0;
                 stock.renderData.clusterCountLOD = 0;
                 stock.renderData.bounds = RenderBounds;
+                if (MaterialOverride.HasValue) stock.renderData.pass = RenderablePass.worldItemOpaque;
                 stock.renderData2 = default;
                 stock.radius = RenderBounds.Radius;
                 stock.colliderBounds = ColliderBounds;
@@ -107,6 +116,33 @@ namespace Sevo.Framework.Runtime
                 stock.collisionPointsTreeId = -1;
                 return stock;
             }
+        }
+
+        private static PropMeshData ReadTintedMaterial()
+        {
+            if (!tintedSupported) throw new InvalidOperationException("The native tinted item surface contract is unavailable.");
+            if (tintedMaterial.HasValue) return tintedMaterial.Value;
+            var buffer = BufferField.GetValue(null) as ComputeBuffer;
+            var shaderMaterial = AssetRepoStarSystem.Mat_WorldItem;
+            var prefabs = ItemInstanceRenderResources.PrefabDatas;
+            var donorId = (int)WorldPropCommon.WorldPropId.rockSmallA;
+            if (buffer == null || !buffer.IsValid() || buffer.stride != Marshal.SizeOf<PropMeshData>()
+                || !prefabs.IsCreated || donorId <= 0 || donorId >= prefabs.Length
+                || shaderMaterial == null || shaderMaterial.shader == null || !shaderMaterial.shader.isSupported
+                || shaderMaterial.shader.name != "Custom/WorldItemIndirect"
+                || shaderMaterial.passCount <= (int)WorldItemShaderPass.forward)
+                throw new InvalidOperationException("The live tinted world-item buffer or material is unavailable.");
+            var donor = WorldPropsResources.worldPropsIndex[donorId];
+            var render = prefabs[donorId].renderData;
+            if (donor == null || donor.Id != WorldPropCommon.WorldPropId.rockSmallA || !render.IsValid
+                || render.clusterStart < 0 || 3L * render.clusterStart + ClusterVertices > buffer.count)
+                throw new InvalidOperationException("The native rock tint surface no longer has a valid world-item row.");
+            var row = new PropMeshData[1];
+            buffer.GetData(row, 0, render.clusterStart * 3, 1);
+            if (row[0].materialType != WorldPropRenderType.rock)
+                throw new InvalidOperationException("The native rock tint source changed material mode to " + row[0].materialType + ".");
+            tintedMaterial = row[0];
+            return row[0];
         }
 
         internal static void Bind(IReadOnlyList<(int Id, MeshRow Mesh, PrefabData Stock)> visuals)
@@ -131,7 +167,7 @@ namespace Sevo.Framework.Runtime
             var cursor = live.count;
             foreach (var row in visuals)
             {
-                var material = vertices[checked(row.Stock.renderData.clusterStart * 3)];
+                var material = row.Mesh.MaterialOverride ?? vertices[checked(row.Stock.renderData.clusterStart * 3)];
                 var tex = new WorldProp.TextureIds
                 {
                     textureId = material.textureID,
@@ -161,23 +197,26 @@ namespace Sevo.Framework.Runtime
             }
             originalBuffer = live;
             expandedBuffer = replacement;
-            foreach (var row in visuals) Tints.Add(row.Id, row.Mesh.Tint);
+            foreach (var row in visuals) Tints.Add(row.Id, (row.Mesh.Tint, row.Mesh.Surface));
         }
 
-        private static void ApplyTint(ref ItemInstanceData __instance, out Color32? __state)
+        private static void ApplyTint(ref ItemInstanceData __instance, out (Color32 Primary, Color32 Secondary)? __state)
         {
             __state = null;
             if (__instance.itemType == WorldItemType.craftingParts
-                && Tints.TryGetValue(__instance.prefabId, out var tint) && ItemResources.Owns(__instance.prefabId))
+                && Tints.TryGetValue(__instance.prefabId, out var style) && ItemResources.Owns(__instance.prefabId))
             {
-                __state = __instance.color;
-                __instance.color = tint;
+                __state = (__instance.color, __instance.colorSec);
+                __instance.color = style.Tint;
+                if (style.Surface == ItemSurfaceMode.Tinted) __instance.colorSec = style.Tint;
             }
         }
 
-        private static void RestoreTint(ref ItemInstanceData __instance, Color32? __state)
+        private static void RestoreTint(ref ItemInstanceData __instance, (Color32 Primary, Color32 Secondary)? __state)
         {
-            if (__state.HasValue) __instance.color = __state.Value;
+            if (!__state.HasValue) return;
+            __instance.color = __state.Value.Primary;
+            __instance.colorSec = __state.Value.Secondary;
         }
 
         private static void ReleaseBuffer()
@@ -187,6 +226,7 @@ namespace Sevo.Framework.Runtime
             originalBuffer?.Dispose();
             originalBuffer = null;
             expandedBuffer = null;
+            tintedMaterial = null;
             Tints.Clear();
         }
     }

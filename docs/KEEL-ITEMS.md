@@ -28,14 +28,16 @@ ItemRegistration.Register("example.parts", "ceramic-sleeve", 1, () =>
     var representation = new ItemVisualDefinition(
         loadSleeveMesh(),
         new Color32(220, 190, 140, 255),
-        new Bounds(new Vector3(0f, 0.01f, 0f), new Vector3(0.14f, 0.11f, 0.14f)));
+        new Bounds(new Vector3(0f, 0.01f, 0f), new Vector3(0.14f, 0.11f, 0.14f)),
+        ItemSurfaceMode.Tinted);
     return new ItemDefinition(WorldPropCommon.WorldPropId.component_construction,
         "Ceramic Sleeve", "An insulating component.", representation);
 });
 ```
 
 - Supply a readable Unity `Mesh` with one triangle submesh, normals, tangents and UV0. The limit is 4,096 vertices and 4,096 triangles. Bake the mesh into local metres at scale 1, with its intended pivot at the item origin. Keel calculates render bounds from the vertices. Coordinates must lie within 16 m of the origin on each axis.
-- The stock template supplies one native material and its texture references. The RGB tint goes through the native item renderer in both the 3D inventory preview and the world. The texture and stock shader determine how the tint appears. Alpha is treated as opaque. For an item published as a recipe output, the stock icon generator uses the same representation to render its inventory icon.
+- The three-argument overload uses `ItemSurfaceMode.StockMaterial`. Some stock materials ignore item tint. Select `ItemSurfaceMode.Tinted` to use the game's opaque, tint-responsive rock surface with the supplied RGB in both native tint channels. This gives a textured finish for shared shapes such as color-coded cartridge grades. The physical template still supplies mass, volume and pickup behavior. Alpha is treated as opaque.
+- The dropped item, stock 3D preview and inventory slot use the same native surface. Keel checks the tint mode and its live material before admitting a tinted declaration. For an item published as a crafting recipe output, the stock icon atlas generator also uses the same representation.
 - `ColliderBox` is a local center and full size in metres. Each axis must be at least 5 mm. The native drop allocates a box and rigidbody. Stock mass, inventory volume and pickup eligibility come from the template. The game computes rigidbody inertia from its render bounds.
 - Keel copies mesh data during registration. The mod owns the source asset. Keep the same key and revision for art updates that preserve the item's meaning. Use the matching mod and item registry for saves.
 
