@@ -140,6 +140,7 @@ namespace Sevo.Framework.Runtime
         {
             ResourceKind.Fluid => "fluid-registry.json",
             ResourceKind.Schematic => "schematic-registry.json",
+            ResourceKind.Item => "item-registry.json",
             _ => throw new InvalidOperationException("Unsupported feature registry.")
         };
 

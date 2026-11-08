@@ -1,5 +1,12 @@
 # Starship Keel changelog
 
+## 0.1.7 preview
+
+- Added opt-in registration of distinct, namespaced crafting items backed by validated stock assets. Mods can use registered items as native crafting inputs or outputs.
+- Added opt-in gathering rules that award registered items when selected mineable world props break and emit stock loot.
+- Documented how mods can give their blocks survival recipes through the existing recipe API. Added a native assembler picker probe for a mod-owned block.
+- The item and gathering preview is for disposable solo profiles. Stock crusher, furnace, and crucible recipe routing requires separate native integration.
+
 ## 0.1.6
 
 - Added an experimental recipe registration API for player inventory crafting, crafting benches, and assemblers. Recipes use persistent namespaced IDs and publish into the game’s managed and native tables.

@@ -209,7 +209,13 @@ namespace Sevo.Framework.Runtime
                 input.schematicId = input.itemType == WorldItemType.craftingParts
                     ? Array.FindIndex(index, row => row.IsValid && row.output.itemType == input.itemType && row.output.id == input.id)
                     : 0;
-                if (input.schematicId < 0) throw new InvalidOperationException("A crafting part has no native source schematic.");
+                if (input.schematicId < 0)
+                {
+                    if (!ItemResources.IsRegistered(input))
+                        throw new InvalidOperationException("A crafting part has no native source schematic.");
+                    // Gathered parts can be supplied directly. A zero ID prevents the assembler from queueing a precursor.
+                    input.schematicId = 0;
+                }
                 return input;
             }).ToArray();
             // Stock availability checks each row independently. Overlapping entries could
@@ -262,6 +268,7 @@ namespace Sevo.Framework.Runtime
 
         private static void ValidateLiveIdentity(CraftingElement element, IEnumerable<CraftingElement> live)
         {
+            if (ItemResources.IsRegistered(element)) return;
             if (element.itemType == WorldItemType.brick)
             {
                 if (element.id > 1 && element.id < Brick.BRICK_INDEX.Length

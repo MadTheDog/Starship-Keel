@@ -20,6 +20,8 @@ Keel defaults to audit mode. Experimental registration requires an explicit opt-
 
 Keel 0.1.6 adds opt-in [native recipe registration](docs/KEEL-RECIPES.md), [fluid definitions and tank hooks](docs/KEEL-FLUIDS.md), and [ore, terrain material, and scanner hooks](docs/KEEL-TERRAIN-HOOKS.md). Each capability has an independent startup audit and opt-in. Use a managed disposable solo profile for the preview.
 
+The 0.1.7 development preview adds opt-in [native crafting items](docs/KEEL-ITEMS.md) and [world-prop gathering drops](docs/KEEL-GATHERING.md).
+
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).

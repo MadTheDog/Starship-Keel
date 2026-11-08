@@ -8,7 +8,7 @@ param(
     [ValidateSet('d3d11','d3d12')][string]$Graphics = 'd3d11',
     [string]$ProbeMaterial,
     [string[]]$ExpectedPlayerLog = @(),
-    [ValidateSet('RECIPES','FLUIDS','ORE_GENERATION','ORE_SCANNER','TERRAIN_MATERIAL_VISUALS')][string[]]$DisableHook = @(),
+    [ValidateSet('ITEMS','GATHERING','RECIPES','FLUIDS','ORE_GENERATION','ORE_SCANNER','TERRAIN_MATERIAL_VISUALS')][string[]]$DisableHook = @(),
     [switch]$DiagnosticJobCompletion,
     [switch]$ScanProbe,
     [switch]$FluidRoundtrip
@@ -32,7 +32,7 @@ $start.Environment['SEVO_PLATFORM_STATE_DIR'] = $state
 $start.Environment['SEVO_PLATFORM_SESSION'] = $session
 $start.Environment['SteamAppId'] = '711980'
 $start.Environment['SteamGameId'] = '711980'
-foreach ($flag in @('RECIPES','FLUIDS','ORE_GENERATION','ORE_SCANNER','TERRAIN_MATERIAL_VISUALS')) {
+foreach ($flag in @('ITEMS','GATHERING','RECIPES','FLUIDS','ORE_GENERATION','ORE_SCANNER','TERRAIN_MATERIAL_VISUALS')) {
     $start.Environment["SEVO_KEEL_EXPERIMENTAL_$flag"] = if ($Mode -eq 'Hooks' -and $flag -notin $DisableHook) { '1' } else { '0' }
 }
 if ($FluidProbe) {

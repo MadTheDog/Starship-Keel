@@ -10,7 +10,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.6")]
+    [BepInPlugin(Id,"Starship Keel","0.1.7")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -72,6 +72,8 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult modularCapability;
                 CapabilityResult codexCapability;
                 CapabilityResult recipes;
+                CapabilityResult items;
+                CapabilityResult gathering;
                 CapabilityResult fluids;
                 CapabilityResult oreGeneration;
                 CapabilityResult oreScanner;
@@ -97,6 +99,8 @@ namespace Sevo.Framework.Runtime
                         : new CapabilityResult("modularReceiverRendering",false,"Native repeat or visual contracts are unavailable.");
                     codexCapability=ContractAudit.EvaluateCodexCategories(metadata.MainModule,out codexMenus);
                     recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
+                    items = ContractAudit.EvaluateItems(metadata.MainModule);
+                    gathering = ContractAudit.EvaluateGathering(metadata.MainModule);
                     fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
                     oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
                     oreScanner = ContractAudit.EvaluateOreScanner(metadata.MainModule);
@@ -125,6 +129,19 @@ namespace Sevo.Framework.Runtime
                 }
                 if(!functionalCapability.Available && attachmentCapability.Available)
                     attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"Shared functional command contracts are unavailable.");
+                items = InstallContentHook(items, "EnableItemRegistration", "ITEMS",
+                    () =>
+                    {
+                        ItemResources.Install(profile!, items, message => Logger.LogWarning(message));
+                        return items;
+                    },
+                    () => ItemResources.Disable());
+                if (gathering.Available && !items.Available)
+                    gathering = new CapabilityResult(gathering.Name, false, "Requires the item registration hook.");
+                gathering = InstallContentHook(gathering, "EnableGatheringDrops", "GATHERING",
+                    () => InstallContentHookPatches(gathering, patches =>
+                        GatheringRegistration.Install(patches, game, message => Logger.LogWarning(message)),
+                        () => GatheringRegistration.Disable()));
                 recipes = InstallContentHook(recipes, "EnableRecipeRegistration", "RECIPES",
                     () => RecipeResources.Install(profile!, recipes, message => Logger.LogWarning(message)),
                     () => RecipeResources.Disable());
@@ -144,12 +161,13 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(terrainMaterials, patches =>
                         TerrainMaterialVisuals.Install(patches, message => Logger.LogWarning(message)),
                         () => TerrainMaterialVisuals.Disable()));
-                if (!experimental && (recipes.Available || fluids.Available || oreGeneration.Available || oreScanner.Available || terrainMaterials.Available))
+                if (!experimental && (items.Available || gathering.Available || recipes.Available || fluids.Available
+                    || oreGeneration.Available || oreScanner.Available || terrainMaterials.Available))
                     status.Mode = "experimental-content-hooks";
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
+                    codexCapability, items, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

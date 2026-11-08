@@ -22,4 +22,29 @@ After publication, resolve the live numeric ID with `RecipeRegistration.TryGetSc
 
 Keel assigns a free ID after the live stock range, preserves the ID across managed profile restarts, and retains removed IDs in the profile as reservations. Native assembler, player and bench consumers use the resulting game schematic table. Keel publishes after stock scrap calculation to keep alternate recipes from changing vanilla recycling costs. The stock research lookup treats a new schematic with no research association as available.
 
-The stock furnace and crucible use explicit candidate IDs and conveyor pull requests inside a shared Burst job. They need their own native integration. The recipe API currently accepts player, bench and assembler levels.
+The stock crusher, furnace and crucible choose inputs and outputs inside native jobs. The furnace and crucible also hardcode their conveyor requests. Adding rows to the crafting table cannot extend those machines. The recipe API accepts player, bench and assembler levels.
+
+In the 0.1.7 preview, use `ItemRegistration.TryCreateElement` in the recipe factory to consume or produce [registered items](KEEL-ITEMS.md). Supply the intermediate explicitly if its only source recipe is another Keel recipe declared in the same batch. Automatic assembler scheduling of those precursor recipes is not supported.
+
+## Craft a mod-owned block in survival
+
+Declare the block and its recipe from the same mod. Capture the brick ID from Keel's block factory. Read it inside the deferred recipe factory, after native block registration. Use `CraftingLevel.assembler` for an assembler-only recipe. The stock assembler also lists bench and player recipes.
+
+```csharp
+int hullId = 0;
+ContentRegistration.Register("example.hulls", "hull", 1, id =>
+{
+    var hull = StockShape.CreateHull(id, "Example Hull");
+    hullId = id;
+    return hull;
+});
+RecipeRegistration.Register("example.hulls", "hull_recipe", 1, () =>
+{
+    var iron = TabSchematics.Schematic_IronIngots.output;
+    iron.quantity = 1f;
+    return new RecipeDefinition(CraftingLevel.assembler, 4f,
+        new CraftingElement(Game.WorldItemType.brick, hullId, 1f), iron);
+});
+```
+
+Enable both managed block registration and recipe registration. Use the same approach with the live brick ID of a mod-owned functional block, receiver, or attachment. Each mod chooses its ingredients, duration, and yield. A new schematic with no research association is available under the stock research lookup. Blueprint shipyard accounting uses additional native metadata and is a separate integration.

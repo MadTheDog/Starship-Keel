@@ -221,6 +221,15 @@ try {
  Check((string?)read!.Invoke(session,new object[]{ResourceKind.Fluid}) == payload,"feature registry persists");
  Check(read!.Invoke(session,new object[]{ResourceKind.Schematic}) == null && session.ReadRegistry() == null,
    "feature namespaces leave existing brick storage untouched");
+ var itemSpace = new ResourceSpace(ResourceKind.Item,8,new[]{0},Array.Empty<int>());
+ var items = new ContentAllocator(new[]{itemSpace},session.ProfileId);
+ var itemRequests = new[]{new ContentRequest("example.items:dust",ResourceKind.Item,1)};
+ var itemId = items.Apply(itemRequests)["example.items:dust"];
+ write!.Invoke(session,new object[]{ResourceKind.Item,items.ToJson()});
+ var loadedItems=ContentAllocator.FromJson((string)read!.Invoke(session,new object[]{ResourceKind.Item})!,new[]{itemSpace});
+ Check(loadedItems.Apply(itemRequests)["example.items:dust"] == itemId
+   && (string?)read.Invoke(session,new object[]{ResourceKind.Fluid}) == payload,
+   "inventory item IDs survive registry reload without touching fluid IDs");
  bool rejected = false;
  try { write!.Invoke(session,new object[]{ResourceKind.Schematic,payload}); }
  catch(System.Reflection.TargetInvocationException exception) when(exception.InnerException is InvalidOperationException) { rejected = true; }

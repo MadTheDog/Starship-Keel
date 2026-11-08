@@ -26,10 +26,15 @@ namespace Sevo.Example.RecipeProbe
         private const float Duration = 7.5f;
         private int expectedOutput;
         private bool published;
+        private int probeHullId;
+        private bool checkedBlockRecipe;
         private static bool deferredTutorial;
 
         private void Awake()
         {
+            if (Environment.GetEnvironmentVariable("SEVO_KEEL_RECIPE_PROBE_BLOCK") == "1")
+                RegisterBlockRecipe();
+
             RecipeRegistration.Register("example.keel-recipes", "bench_probe", 1, () =>
             {
                 var stock = TabSchematics.STONE_SLAB;
@@ -44,6 +49,7 @@ namespace Sevo.Example.RecipeProbe
 
         private void Update()
         {
+            CheckBlockRecipe();
             if (published || expectedOutput == 0 || !CraftingSchematic.schematicsNativeArray.IsCreated
                 || !RecipeRegistration.TryGetSchematicId("example.keel-recipes:bench_probe", out var id)
                 || id <= 0 || id >= CraftingSchematic.Index.Length || id >= CraftingSchematic.schematicsNativeArray.Length)
@@ -58,7 +64,60 @@ namespace Sevo.Example.RecipeProbe
             published = true;
             Logger.LogInfo("Recipe probe passed: additive bench recipe is present in the managed index, native job table and Codex list. id=" + id);
             if (Environment.GetEnvironmentVariable("SEVO_KEEL_RECIPE_PROBE_CRAFT") == "1")
+            {
+                var exerciseKey = Environment.GetEnvironmentVariable("SEVO_KEEL_RECIPE_PROBE_CRAFT_KEY");
+                if (!string.IsNullOrEmpty(exerciseKey))
+                {
+                    if (!RecipeRegistration.TryGetSchematicId(exerciseKey, out var exerciseId))
+                    {
+                        Logger.LogError("KEEL_RECIPE_CRAFT FAIL no published recipe for " + exerciseKey);
+                        return;
+                    }
+                    entry = CraftingSchematic.Index[exerciseId];
+                }
                 StartCoroutine(ReportExercise(ExerciseBench(entry)));
+            }
+        }
+
+        private void RegisterBlockRecipe()
+        {
+            ContentRegistration.Register("example.keel-recipes", "probe_hull", 1, id =>
+            {
+                var hull = StockShape.CreateHull(id, "Recipe Probe Hull");
+                probeHullId = id;
+                return hull;
+            });
+
+            RecipeRegistration.Register("example.keel-recipes", "probe_hull_recipe", 1, () =>
+            {
+                var iron = TabSchematics.Schematic_IronIngots.output;
+                iron.quantity = 1f;
+                return new RecipeDefinition(CraftingLevel.assembler, 4f,
+                    new CraftingElement(WorldItemType.brick, probeHullId, 1f), iron);
+            });
+        }
+
+        private void CheckBlockRecipe()
+        {
+            if (checkedBlockRecipe || probeHullId == 0
+                || !RecipeRegistration.TryGetSchematicId("example.keel-recipes:probe_hull_recipe", out var id))
+                return;
+
+            checkedBlockRecipe = true;
+            var row = CraftingSchematic.Index[id];
+            var primaryId = Brick.BrickProperties[probeHullId].schematicId;
+            var isAssemblerSchematic = typeof(UI_Assembler).GetMethod("IsAssemblerSchematic",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var eligible = isAssemblerSchematic?.Invoke(null, new object[] { row }) is true;
+            var listed = CraftingSchematic.SchematicsByCodexTab.Values.Any(rows => rows.Any(value => value.id == id));
+            if (!eligible || !listed || row.output.itemType != WorldItemType.brick || row.output.id != probeHullId
+                || row.craftingLevel != CraftingLevel.assembler || primaryId != id
+                || !CraftingSchematic.schematicsNativeArray[id].Equals(row))
+            {
+                Logger.LogError($"KEEL_BLOCK_RECIPE_PROBE FAIL brick={probeHullId} schematic={id} primary={primaryId} eligible={eligible} listed={listed}");
+                return;
+            }
+            Logger.LogInfo($"KEEL_BLOCK_RECIPE_PROBE PASS brick={probeHullId} schematic={id} primary={primaryId} eligible={eligible} listed={listed}");
         }
 
         private IEnumerator ReportExercise(IEnumerator exercise)
@@ -194,7 +253,7 @@ namespace Sevo.Example.RecipeProbe
                 if (grid != null && !grid.WillBeUnspawned && SoloReady())
                     Dependency.PlayerNetwork.ServerDestroyEntity(grid);
             }
-            Logger.LogInfo($"KEEL_RECIPE_CRAFT PASS session={session} id={entry.id} input={entry.element0.quantity} output={entry.outputQuantity}");
+            Logger.LogInfo($"KEEL_RECIPE_CRAFT PASS session={session} id={entry.id} input={entry.element0.itemType}/{entry.element0.id} x{entry.element0.quantity} output={entry.output.itemType}/{entry.output.id} x{entry.outputQuantity}");
         }
 
         private static bool DeferCreativeTutorial(GameIntroductionResources.GameIntroductionLogic __instance)

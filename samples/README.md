@@ -30,3 +30,8 @@ Keys and content revisions are durable identities. Renaming a display name is in
 - [Example.RecipeProbe](Example.RecipeProbe/README.md) adds a recipe using existing native items.
 - [Example.FluidProbe](Example.FluidProbe/README.md) defines fluids and drives a stock tank and pipe loop in the isolated lab.
 - [Example.OreHooks](../docs/KEEL-TERRAIN-HOOKS.md#probe) changes one existing ore slot and subscribes to the scanner data feed.
+
+## Keel 0.1.7 preview probes
+
+- [Example.ItemProbe](Example.ItemProbe/README.md) checks distinct native item identities, recipes, and item serialization.
+- [Example.GatheringProbe](../docs/KEEL-GATHERING.md#disposable-lab-probe) checks bonus drops through the native world-prop damage path.
