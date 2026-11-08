@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Sevo.Example.FluidProbe</AssemblyName>
+    <ProbeManagedPath Condition="'$(ProbeManagedPath)' == ''">..\..\lab\game\Starship EVO_Data\Managed</ProbeManagedPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sevo.Framework.Runtime\Sevo.Framework.Runtime.csproj" Private="false" />
+    <Reference Include="BepInEx" HintPath="..\..\.refs\bepinex\BepInEx.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="..\..\.refs\game\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="..\..\.refs\game\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="..\..\.refs\game\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(ProbeManagedPath)\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="Unity.Burst" HintPath="$(ProbeManagedPath)\Unity.Burst.dll" Private="false" />
+    <Reference Include="UnityEngine.BurstModule" HintPath="$(ProbeManagedPath)\UnityEngine.BurstModule.dll" Private="false" />
+    <Reference Include="Mirror" HintPath="$(ProbeManagedPath)\Mirror.dll" Private="false" />
+    <Reference Include="MessagePack" HintPath="$(ProbeManagedPath)\MessagePack.dll" Private="false" />
+  </ItemGroup>
+</Project>

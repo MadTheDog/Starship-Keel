@@ -1,5 +1,13 @@
 # Starship Keel changelog
 
+## 0.1.6
+
+- Added an experimental recipe registration API for player inventory crafting, crafting benches, and assemblers. Recipes use persistent namespaced IDs and publish into the game’s managed and native tables.
+- Added experimental fluid definitions and post-job tank access for mod-owned producers and consumers. Compatible stock tanks and pipes carry the assigned fluid IDs.
+- Added opt-in rules for existing planet and asteroid ore slots, visual overrides for existing named terrain materials, and immutable snapshots of native ore scanner groups.
+- Added capability-specific contract checks, profile ID maps for recipes and fluids, and separate sample plugins. Each capability starts disabled.
+- Stock furnace and crucible recipes, new native terrain slots and scanner symbols, and new fluid behavior for existing stock machines require further game integration. This preview targets disposable solo profiles.
+
 ## [0.1.5](https://github.com/MadTheDog/Starship-Keel/releases/tag/v0.1.5)
 
 - Added named native Codex category selection for managed hulls, functional blocks, receivers, and attachments. The solo lab verified visible entries in Weapons, Construction, and Interior, default-category fallback, and hidden owned repeats.

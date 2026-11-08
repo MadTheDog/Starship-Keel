@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" />
+    <Reference Include="Assembly-CSharp"><HintPath>../../.refs/game/Assembly-CSharp.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>../../.refs/game/UnityEngine.CoreModule.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

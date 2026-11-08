@@ -10,7 +10,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.5")]
+    [BepInPlugin(Id,"Starship Keel","0.1.6")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -27,6 +27,7 @@ namespace Sevo.Framework.Runtime
         private Harmony? attachmentVisualHarmony;
         private Harmony? receiverRepeatHarmony;
         private Harmony? modularReceiverHarmony;
+        private readonly List<Action> contentHookStops = new List<Action>();
         private readonly AttachmentMaterialResources attachmentMaterials=new AttachmentMaterialResources();
         private Assembly? pendingAttachmentGame;
         private CapabilityResult? pendingAttachmentCapability;
@@ -70,6 +71,11 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult defaultPaintCapability;
                 CapabilityResult modularCapability;
                 CapabilityResult codexCapability;
+                CapabilityResult recipes;
+                CapabilityResult fluids;
+                CapabilityResult oreGeneration;
+                CapabilityResult oreScanner;
+                CapabilityResult terrainMaterials;
                 using(var metadata=AssemblyDefinition.ReadAssembly(game.Location))
                 {
                     status.AssemblyMvid=metadata.MainModule.Mvid.ToString("D");
@@ -90,13 +96,23 @@ namespace Sevo.Framework.Runtime
                         ? ContractAudit.EvaluateModularReceiverRendering(metadata.MainModule)
                         : new CapabilityResult("modularReceiverRendering",false,"Native repeat or visual contracts are unavailable.");
                     codexCapability=ContractAudit.EvaluateCodexCategories(metadata.MainModule,out codexMenus);
+                    recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
+                    fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
+                    oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
+                    oreScanner = ContractAudit.EvaluateOreScanner(metadata.MainModule);
+                    terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
                     if(attachmentCapability.Available && !FunctionalStockTemplate.DiscoverReceiverTemplates(metadata.MainModule))
                         attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"No native side-slot receiver layout was found.");
                 }
                 foreach(var capability in capabilities.Values)
                     Logger.LogInfo(capability.Name+": "+(capability.Available ? "available — " : "unavailable — ")+capability.Reason);
-                Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
-                if(experimental && !status.ContractsValidated) throw new InvalidOperationException("Experimental registration contracts unavailable.");
+                if (experimental && !status.ContractsValidated)
+                {
+                    experimental = false;
+                    status.Mode = "audit";
+                    Logger.LogWarning("Experimental brick registration disabled because its native contracts are unavailable.");
+                }
+                InstallBrickLifecycle(game);
                 if(experimental && functionalRequested && functionalCapability.Available)
                 {
                     functionalCapability=InstallFunctionalCommands(game,functionalCapability);
@@ -109,9 +125,31 @@ namespace Sevo.Framework.Runtime
                 }
                 if(!functionalCapability.Available && attachmentCapability.Available)
                     attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"Shared functional command contracts are unavailable.");
+                recipes = InstallContentHook(recipes, "EnableRecipeRegistration", "RECIPES",
+                    () => RecipeResources.Install(profile!, recipes, message => Logger.LogWarning(message)),
+                    () => RecipeResources.Disable());
+                fluids = InstallContentHook(fluids, "EnableFluidRegistration", "FLUIDS",
+                    () => InstallContentHookPatches(fluids, patches =>
+                        FluidRegistration.Install(patches, game, profile!, message => Logger.LogWarning(message)),
+                        () => FluidRegistration.Disable()));
+                oreGeneration = InstallContentHook(oreGeneration, "EnableOreGeneration", "ORE_GENERATION",
+                    () => InstallContentHookPatches(oreGeneration, patches =>
+                        OreGeneration.Install(patches, message => Logger.LogWarning(message)),
+                        () => OreGeneration.Disable()));
+                oreScanner = InstallContentHook(oreScanner, "EnableOreScannerSnapshots", "ORE_SCANNER",
+                    () => InstallContentHookPatches(oreScanner, patches =>
+                        OreScannerSnapshots.Install(patches, message => Logger.LogWarning(message)),
+                        () => OreScannerSnapshots.Disable()));
+                terrainMaterials = InstallContentHook(terrainMaterials, "EnableTerrainMaterialVisuals", "TERRAIN_MATERIAL_VISUALS",
+                    () => InstallContentHookPatches(terrainMaterials, patches =>
+                        TerrainMaterialVisuals.Install(patches, message => Logger.LogWarning(message)),
+                        () => TerrainMaterialVisuals.Disable()));
+                if (!experimental && (recipes.Available || fluids.Available || oreGeneration.Available || oreScanner.Available || terrainMaterials.Available))
+                    status.Mode = "experimental-content-hooks";
+                Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability})
+                    codexCapability, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -128,6 +166,26 @@ namespace Sevo.Framework.Runtime
                     status.Reason="Audit metadata available; lifecycle observation unavailable.";
                     Publish(); return;
                 }
+                status.Reason="Awaiting native resource cycle; resource readiness does not authorize world/blueprint loading.";
+                Publish();
+            }
+            catch(Exception exception)
+            {
+                StopContentHooks();
+                KeelFunctionalCommand.Enabled=false;
+                FunctionalEventGate.Enabled=false;
+                WeaponAttachmentAvailability.Enabled=false;
+                TryUnpatch(gateHarmony);
+                TryUnpatch(functionalHarmony);
+                TryUnpatch(harmony);
+                Fail("Framework initialization failed",exception);
+            }
+        }
+        private void InstallBrickLifecycle(Assembly game)
+        {
+            if (!Available("lifecycle")) return;
+            try
+            {
                 adapter=new GameAdapter();
                 harmony=new Harmony(Id);
                 if(experimental) StockTemplateResources.Install(harmony,game);
@@ -135,20 +193,85 @@ namespace Sevo.Framework.Runtime
                 Patch(game,"Manager.GameResourcesManager","OnGameReload",nameof(BeforeReload),null,nameof(NativeFinalizer));
                 Patch(game,"Manager.GameResourcesManager","OnResourceLoaded",nameof(BeforeReady),nameof(AfterReady),nameof(NativeFinalizer));
                 Patch(game,"Manager.GameResourcesManager","ReleaseResources",nameof(BeforeRelease),null,null);
-                status.Reason="Awaiting native resource cycle; resource readiness does not authorize world/blueprint loading.";
-                Publish();
             }
-            catch(Exception exception)
+            catch (Exception exception)
             {
-                KeelFunctionalCommand.Enabled=false;
-                FunctionalEventGate.Enabled=false;
-                WeaponAttachmentAvailability.Enabled=false;
-                gateHarmony?.UnpatchSelf();
-                functionalHarmony?.UnpatchSelf();
-                harmony?.UnpatchSelf();
-                Fail("Framework initialization failed",exception);
+                TryUnpatch(harmony);
+                experimental = false;
+                status.Mode = "audit";
+                status.ContractsValidated = false;
+                var reason = "Brick lifecycle hooks unavailable: " + exception.Message;
+                capabilities = capabilities.ToDictionary(pair => pair.Key, pair => pair.Key == "lifecycle"
+                    ? new CapabilityResult("lifecycle", false, reason) : pair.Value);
+                Logger.LogWarning(reason);
             }
         }
+
+        private CapabilityResult InstallContentHook(CapabilityResult capability, string setting, string flag,
+            Func<CapabilityResult> install, Action? stop = null)
+        {
+            var requested = Config.Bind("Experimental", setting, false,
+                "Enable this content hook in a managed disposable solo profile.").Value
+                || Environment.GetEnvironmentVariable("SEVO_KEEL_EXPERIMENTAL_" + flag) == "1";
+            var result = capability;
+            if (capability.Available)
+            {
+                if (!requested || profile == null)
+                    result = new CapabilityResult(capability.Name, false,
+                        requested ? "Requires a valid managed profile." : "Compatible and disabled by default.");
+                else
+                {
+                    try
+                    {
+                        result = install();
+                        if (result.Available && stop != null) contentHookStops.Add(stop);
+                    }
+                    catch (Exception exception)
+                    {
+                        result = new CapabilityResult(capability.Name, false, "Hook installation failed. " + exception.Message);
+                    }
+                }
+            }
+            Logger.LogInfo(result.Name + ": " + result.Reason);
+            return result;
+        }
+
+        private CapabilityResult InstallContentHookPatches(CapabilityResult capability, Action<Harmony> install, Action disable)
+        {
+            var patches = new Harmony(Id + "." + capability.Name);
+            try
+            {
+                install(patches);
+                contentHookStops.Add(() =>
+                {
+                    try { disable(); }
+                    finally { patches.UnpatchSelf(); }
+                });
+                return capability;
+            }
+            catch
+            {
+                TryUnpatch(patches);
+                throw;
+            }
+        }
+
+        private void StopContentHooks()
+        {
+            foreach (var stop in contentHookStops)
+            {
+                try { stop(); }
+                catch (Exception exception) { Logger.LogError("Cannot stop a content hook: " + exception); }
+            }
+            contentHookStops.Clear();
+        }
+
+        private void TryUnpatch(Harmony? patches)
+        {
+            try { patches?.UnpatchSelf(); }
+            catch (Exception exception) { Logger.LogError("Cannot remove Harmony patches for " + patches?.Id + ": " + exception); }
+        }
+
         private CapabilityResult InstallEventGate(CapabilityResult capability)
         {
             try
@@ -160,7 +283,7 @@ namespace Sevo.Framework.Runtime
             }
             catch(Exception exception)
             {
-                gateHarmony?.UnpatchSelf();
+                TryUnpatch(gateHarmony);
                 return new CapabilityResult(capability.Name,false,"Event Gate hook unavailable: "+exception.Message);
             }
         }
@@ -200,7 +323,7 @@ namespace Sevo.Framework.Runtime
             }
             catch(Exception exception)
             {
-                functionalHarmony?.UnpatchSelf();
+                TryUnpatch(functionalHarmony);
                 return new CapabilityResult(capability.Name,false,"Stock switch hook unavailable: "+exception.Message);
             }
         }
@@ -494,6 +617,7 @@ namespace Sevo.Framework.Runtime
         private void OnDestroy()
         {
             if(!ReferenceEquals(instance,this)) return;
+            StopContentHooks();
             StopFunctionalCommands();
             KeelFunctionalCommand.Enabled=false;
             FunctionalEventGate.Enabled=false;
@@ -566,7 +690,9 @@ namespace Sevo.Framework.Runtime
         {
             status.ResourcesReady=resourceChecksPassed && !status.Failed;
             status.Reason=status.ResourcesReady
-                ? "Native resource callback completed. "+(experimental ? "Experimental owned registrations validated." : "Audit-only observation; no content IDs allocated.")+" World/blueprint admission is not established."
+                ? "Native resource callback completed. "+(experimental ? "Experimental owned brick registrations validated."
+                    : status.Mode == "experimental-content-hooks" ? "Experimental content hooks installed; no brick IDs allocated."
+                    : "Audit-only observation; no content IDs allocated.")+" World/blueprint admission is not established."
                 : "Native resource observation incomplete; inspect capabilities and failure reason.";
             Logger.LogInfo(status.Reason+" Bricks="+status.OccupiedBricks+"/"+status.BrickCapacity+"; shapes="+status.OccupiedShapes+"/"+status.ShapeCapacity);
             Publish();

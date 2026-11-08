@@ -24,3 +24,9 @@ ContentRegistration.Register("example.alpha", "hull", 1,
 ```
 
 Keys and content revisions are durable identities. Renaming a display name is independent of its key. A changed revision is rejected until an explicit migration exists. Submit declarations before the collection phase closes; late registration and duplicate keys are errors. Arbitrary unported plugins can still overwrite native tables outside the supported registration API; the framework detects ownership loss at its resource boundaries but cannot sandbox their code.
+
+## Keel 0.1.6 hook probes
+
+- [Example.RecipeProbe](Example.RecipeProbe/README.md) adds a recipe using existing native items.
+- [Example.FluidProbe](Example.FluidProbe/README.md) defines fluids and drives a stock tank and pipe loop in the isolated lab.
+- [Example.OreHooks](../docs/KEEL-TERRAIN-HOOKS.md#probe) changes one existing ore slot and subscribes to the scanner data feed.

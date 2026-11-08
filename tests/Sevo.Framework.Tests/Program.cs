@@ -208,6 +208,24 @@ try {
  var status=File.ReadAllText(Path.Combine(profile,"runtime-status.json"));
  Check(status.Contains("\"session\":\"nonce\"") && status.Contains("\"schemaVersion\":1") && status.Contains("\"processId\":"),"session handshake");
  Reject(()=>Sevo.Framework.Runtime.ProfileProtocol.WriteStatus(profile,Path.Combine(temp,"other"),"nonce",Array.Empty<CapabilityResult>()),"marker mismatch");
+ var session = Sevo.Framework.Runtime.ProfileProtocol.Open(profile,temp,"nonce");
+ var methods = session.GetType();
+ var read = methods.GetMethod("ReadFeatureRegistry",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+ var write = methods.GetMethod("WriteFeatureRegistry",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+ Check(read != null && write != null,"feature registries must use the validated profile protocol");
+ var fluidSpace = new ResourceSpace(ResourceKind.Fluid,8,new[]{0},Array.Empty<int>());
+ var fluid = new ContentAllocator(new[]{fluidSpace},session.ProfileId);
+ fluid.Apply(new[]{new ContentRequest("example.fluids:demo",ResourceKind.Fluid,1)});
+ var payload = fluid.ToJson();
+ write!.Invoke(session,new object[]{ResourceKind.Fluid,payload});
+ Check((string?)read!.Invoke(session,new object[]{ResourceKind.Fluid}) == payload,"feature registry persists");
+ Check(read!.Invoke(session,new object[]{ResourceKind.Schematic}) == null && session.ReadRegistry() == null,
+   "feature namespaces leave existing brick storage untouched");
+ bool rejected = false;
+ try { write!.Invoke(session,new object[]{ResourceKind.Schematic,payload}); }
+ catch(System.Reflection.TargetInvocationException exception) when(exception.InnerException is InvalidOperationException) { rejected = true; }
+ Check(rejected && read!.Invoke(session,new object[]{ResourceKind.Schematic}) == null,
+   "cross-feature registry data is rejected before writing");
 } finally { Directory.Delete(temp,true); }
 checks += ExpandedTests.Run();
 checks += RegistrationTests.Run();
@@ -215,4 +233,7 @@ checks += FunctionalLifetimeTests.Run();
 checks += AttachmentMaterialAuditTests.Run();
 checks += AttachmentDefaultPaintAuditTests.Run();
 checks += CodexCategoryAuditTests.Run();
+checks += FluidHookTests.Run();
+checks += OreGenerationTests.Run();
+using (var recipeGame = AssemblyDefinition.ReadAssembly(".refs/game/Assembly-CSharp.dll")) RecipeAuditTests.Run(recipeGame.MainModule);
 Console.WriteLine($"{checks} checks passed");

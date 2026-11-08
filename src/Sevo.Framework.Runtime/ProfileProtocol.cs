@@ -79,7 +79,7 @@ namespace Sevo.Framework.Runtime
         }
     }
 
-    /// <summary>Only three fixed files are read/written below a pre-existing marked directory.</summary>
+    /// <summary>Only fixed file names are read/written below a pre-existing marked directory.</summary>
     public sealed class ProfileSession
     {
         private readonly string gameDirectory;
@@ -126,18 +126,39 @@ namespace Sevo.Framework.Runtime
         {
             if (ReadMarker() != ProfileId) throw new InvalidOperationException("Runtime profile ownership changed; restart required.");
         }
-        public string? ReadRegistry()
+        internal string? ReadFeatureRegistry(ResourceKind kind) => ReadRegistryFile(FeatureRegistryName(kind), kind);
+
+        internal void WriteFeatureRegistry(ResourceKind kind, string json)
         {
-            ValidateMarker(); var path = Child("registry.json");
+            var name = FeatureRegistryName(kind);
+            ValidateMarker();
+            ValidateLineage(json, kind);
+            AtomicWrite(name, Encoding.UTF8.GetBytes(json));
+        }
+
+        private static string FeatureRegistryName(ResourceKind kind) => kind switch
+        {
+            ResourceKind.Fluid => "fluid-registry.json",
+            ResourceKind.Schematic => "schematic-registry.json",
+            _ => throw new InvalidOperationException("Unsupported feature registry.")
+        };
+
+        public string? ReadRegistry() => ReadRegistryFile("registry.json", null);
+
+        private string? ReadRegistryFile(string name, ResourceKind? kind)
+        {
+            ValidateMarker(); var path = Child(name);
             if (!File.Exists(path)) return null;
             if (new FileInfo(path).Length > 4 * 1024 * 1024) throw new InvalidOperationException("Oversized registry.");
-            var json = File.ReadAllText(path); ValidateLineage(json); return json;
+            var json = File.ReadAllText(path); ValidateLineage(json, kind); return json;
         }
-        private void ValidateLineage(string json)
+        private void ValidateLineage(string json, ResourceKind? kind = null)
         {
             var state = RegistryJson.Read(json);
             if (state.SchemaVersion != 1 || !Guid.TryParse(state.Lineage, out var lineage) || lineage != ProfileId)
                 throw new InvalidOperationException("Registry belongs to another profile lineage.");
+            if (kind.HasValue && state.Mappings.Any(mapping => mapping == null || mapping.Kind != kind.Value))
+                throw new InvalidOperationException("Registry contains another feature's content kind.");
         }
         public void WriteRegistry(string json)
         { ValidateMarker(); ValidateLineage(json); AtomicWrite("registry.json", Encoding.UTF8.GetBytes(json)); }

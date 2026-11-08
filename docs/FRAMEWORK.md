@@ -17,6 +17,12 @@ The durable identity is `example.alpha:hull`, independent of its display name. T
 
 Keel 0.1.0 supports stock hull definitions. Keel 0.1.2 adds [functional blocks](KEEL-FUNCTIONAL.md) with mod-selected templates, placement callbacks, and sustained logic input. Keel 0.1.4 adds [weapon attachment slots](KEEL-WEAPON-ATTACHMENTS.md) and custom addon meshes within the stock placement contract. Keel 0.1.5 adds custom material palettes, native paint settings, receiver host and modular repeat visuals, and Codex category choice. Mods own their block definitions, assets, and gameplay.
 
+## Experimental content hooks in 0.1.6
+
+Use the [recipe](KEEL-RECIPES.md), [fluid](KEEL-FLUIDS.md), and [terrain and scanner](KEEL-TERRAIN-HOOKS.md) guides for declarations, opt-ins, and examples. Register declarations from the dependent plugin’s `Awake`. Keel owns admission and integration with validated stock entry points. The dependent mod owns definitions, processing rules, terrain choices, and overlays.
+
+Recipes and fluids use separate ID files in the marked profile directory. Keep `schematic-registry.json` and `fluid-registry.json` with the profile and saves. Each file has its own allocation space and preserves tombstones. Recipe and fluid registration can fail independently of block registration.
+
 ## Choose a Codex category
 
 With Keel 0.1.5, use the `codexCategory` overload of `RegisterFunctionalBlock`, `RegisterWeaponAttachmentReceiver`, `RegisterWeaponAttachment`, or `StockShape.CreateHull`. Pass the case-sensitive native `CodexTab` field name. For example, `"WEAPONS"` selects **Items → Weapons**. Other native Items names include `"CONSTRUCTION"`, `"INTERIOR"`, `"HULL_BLOCKS"`, and `"COMMANDS"` (Logic Elements).

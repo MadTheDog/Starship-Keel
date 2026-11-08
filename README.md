@@ -18,6 +18,8 @@ This verifies Keel startup with your existing loader. Experimental block registr
 
 Keel defaults to audit mode. Experimental registration requires an explicit opt-in and a valid Uplink-managed session. The sample mods demonstrate stock hull registration and persistent IDs. The [functional-block API](docs/KEEL-FUNCTIONAL.md) supports native templates and sustained Switch or Event Gate input in solo play. The [attachment API](docs/KEEL-WEAPON-ATTACHMENTS.md) supports native side slots, custom meshes and materials, native paint, and modular receiver visuals within the stock placement contract. Mods can [choose a native Codex category](docs/FRAMEWORK.md#choose-a-codex-category) for their managed content. The verified scope is solo placement and in-memory save reconstruction.
 
+Keel 0.1.6 adds opt-in [native recipe registration](docs/KEEL-RECIPES.md), [fluid definitions and tank hooks](docs/KEEL-FLUIDS.md), and [ore, terrain material, and scanner hooks](docs/KEEL-TERRAIN-HOOKS.md). Each capability has an independent startup audit and opt-in. Use a managed disposable solo profile for the preview.
+
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).
