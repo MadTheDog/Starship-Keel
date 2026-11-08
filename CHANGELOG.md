@@ -1,8 +1,9 @@
 # Starship Keel changelog
 
-## Unreleased
+## 0.1.8 candidate
 
 - Added an opt-in item representation for caller-owned meshes, tint through the stock item material, and separate box colliders. The native 3D inventory preview and dropped item use the same representation.
+- Added opt-in exact-item processing recipes for the stock Crusher and Arc Furnace. Recipes use native machine power, output storage, and conveyor requests.
 
 ## 0.1.7 preview
 

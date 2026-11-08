@@ -22,9 +22,7 @@ After publication, resolve the live numeric ID with `RecipeRegistration.TryGetSc
 
 Keel assigns a free ID after the live stock range, preserves the ID across managed profile restarts, and retains removed IDs in the profile as reservations. Native assembler, player and bench consumers use the resulting game schematic table. Keel publishes after stock scrap calculation to keep alternate recipes from changing vanilla recycling costs. The stock research lookup treats a new schematic with no research association as available.
 
-The stock crusher, furnace and crucible choose inputs and outputs inside native jobs. The furnace and crucible also hardcode their conveyor requests. Adding rows to the crafting table cannot extend those machines. The recipe API accepts player, bench and assembler levels.
-
-On Steam build 26451593 / 26w45a, the Crusher recognizes ore-bearing stone and damaged bricks. Its ore path has fixed output identities and quantities. The Arc Furnace has separate fixed recipe candidates and conveyor requests. Its native initializer can stage a schematic for stock timing and power, but completion can produce output before revalidating the input. Both machines have type-specific output routing, and their save records omit active processing state. A reusable machine recipe capability needs a native boundary that admits exact item identities, reserves the required input through commit, routes exact outputs, and defines how to resume or cancel in-flight work after load.
+The recipe API on this page accepts player, bench and assembler levels. For the stock Crusher and Arc Furnace, use the separate [machine recipe API](KEEL-MACHINE-RECIPES.md).
 
 In the 0.1.7 preview, use `ItemRegistration.TryCreateElement` in the recipe factory to consume or produce [registered items](KEEL-ITEMS.md). Supply the intermediate explicitly if its only source recipe is another Keel recipe declared in the same batch. Automatic assembler scheduling of those precursor recipes is not supported.
 

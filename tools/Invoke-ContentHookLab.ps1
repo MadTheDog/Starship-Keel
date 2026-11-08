@@ -67,6 +67,9 @@ try {
                         if ($FluidProbe -and $log -match "KEEL_FLUID_PROBE FAIL[^\r\n]*session=$session") {
                             throw $Matches[0]
                         }
+                        if ($log -match "KEEL_MACHINE_PROBE FAIL[^\r\n]*session=$session") {
+                            throw $Matches[0]
+                        }
                         $player = if (Test-Path -LiteralPath $playerLog) { Get-Content -LiteralPath $playerLog -Raw } else { "" }
                         $missing = @($ExpectedLog | Where-Object { !$log.Contains($_) })
                         $missing += @($ExpectedPlayerLog | Where-Object { !$player.Contains($_) })

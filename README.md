@@ -22,6 +22,8 @@ Keel 0.1.6 adds opt-in [native recipe registration](docs/KEEL-RECIPES.md), [flui
 
 The 0.1.7 development preview adds opt-in [native crafting items](docs/KEEL-ITEMS.md) and [world-prop gathering drops](docs/KEEL-GATHERING.md).
 
+The 0.1.8 candidate adds optional meshes, tints and box colliders for registered items and [native machine recipes](docs/KEEL-MACHINE-RECIPES.md) for the Crusher and Arc Furnace.
+
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).

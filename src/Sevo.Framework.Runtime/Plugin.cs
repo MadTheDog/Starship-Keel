@@ -10,7 +10,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.7")]
+    [BepInPlugin(Id,"Starship Keel","0.1.8")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -74,6 +74,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult recipes;
                 CapabilityResult items;
                 CapabilityResult itemVisuals;
+                CapabilityResult machineRecipes;
                 CapabilityResult gathering;
                 CapabilityResult fluids;
                 CapabilityResult oreGeneration;
@@ -102,6 +103,7 @@ namespace Sevo.Framework.Runtime
                     recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
                     items = ContractAudit.EvaluateItems(metadata.MainModule);
                     itemVisuals = ContractAudit.EvaluateItemVisuals(metadata.MainModule);
+                    machineRecipes = ContractAudit.EvaluateMachineRecipes(metadata.MainModule);
                     gathering = ContractAudit.EvaluateGathering(metadata.MainModule);
                     fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
                     oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
@@ -142,6 +144,10 @@ namespace Sevo.Framework.Runtime
                     itemVisuals = new CapabilityResult(itemVisuals.Name, false, "Requires the item registration hook.");
                 itemVisuals = InstallContentHook(itemVisuals, "EnableItemVisuals", "ITEM_VISUALS",
                     () => InstallContentHookPatches(itemVisuals, ItemVisualResources.Install, ItemVisualResources.Disable));
+                machineRecipes = InstallContentHook(machineRecipes, "EnableMachineRecipes", "MACHINE_RECIPES",
+                    () => InstallContentHookPatches(machineRecipes,
+                        patches => MachineRecipeResources.Install(patches, message => Logger.LogWarning(message)),
+                        MachineRecipeResources.Disable));
                 if (gathering.Available && !items.Available)
                     gathering = new CapabilityResult(gathering.Name, false, "Requires the item registration hook.");
                 gathering = InstallContentHook(gathering, "EnableGatheringDrops", "GATHERING",
@@ -167,13 +173,13 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(terrainMaterials, patches =>
                         TerrainMaterialVisuals.Install(patches, message => Logger.LogWarning(message)),
                         () => TerrainMaterialVisuals.Disable()));
-                if (!experimental && (items.Available || gathering.Available || recipes.Available || fluids.Available
+                if (!experimental && (items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || terrainMaterials.Available))
                     status.Mode = "experimental-content-hooks";
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, items, itemVisuals, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
+                    codexCapability, items, itemVisuals, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
