@@ -16,4 +16,27 @@ Use `TryGetPrefabId` for a numeric ID within the current resource cycle. Use `Tr
 
 Keep `item-registry.json` with the profile and saves. Keel preserves allocated IDs and retains removed entries as reservations. Each saved item carries its profile, key and revision. The active item hook checks this identity as individual items load. The game can catch item-load errors and continue loading other parts of a world. Use this candidate only in disposable solo worlds and keep the matching registry, mod and hook enabled for every load. Avoid opening worlds made with these items after removing the mod, changing the registry or disabling the hook.
 
-Use the item probe for runtime evidence. The feature uses the stock crafting-part category and a verified existing mesh and collider. Custom meshes, physical properties, multiplayer synchronization and save migration need separate contracts.
+Use the item probe for runtime evidence. Basic item registration uses the stock crafting-part category and a verified existing mesh and collider. Multiplayer synchronization and save migration need separate contracts.
+
+## Optional item representation
+
+The item representation preview accepts `ItemVisualDefinition` as the fourth argument to `ItemDefinition`. Enable both `EnableItemRegistration` and `EnableItemVisuals` in the `[Experimental]` section of the Keel configuration. Managed test sessions can also set `SEVO_KEEL_EXPERIMENTAL_ITEMS=1` and `SEVO_KEEL_EXPERIMENTAL_ITEM_VISUALS=1`.
+
+```csharp
+ItemRegistration.Register("example.parts", "ceramic-sleeve", 1, () =>
+{
+    var representation = new ItemVisualDefinition(
+        loadSleeveMesh(),
+        new Color32(220, 190, 140, 255),
+        new Bounds(new Vector3(0f, 0.01f, 0f), new Vector3(0.14f, 0.11f, 0.14f)));
+    return new ItemDefinition(WorldPropCommon.WorldPropId.component_construction,
+        "Ceramic Sleeve", "An insulating component.", representation);
+});
+```
+
+- Supply a readable Unity `Mesh` with one triangle submesh, normals, tangents and UV0. The limit is 4,096 vertices and 4,096 triangles. Bake the mesh into local metres at scale 1, with its intended pivot at the item origin. Keel calculates render bounds from the vertices. Coordinates must lie within 16 m of the origin on each axis.
+- The stock template supplies one native material and its texture references. The RGB tint goes through the native item renderer in both the 3D inventory preview and the world. The texture and stock shader determine how the tint appears. Alpha is treated as opaque. For an item published as a recipe output, the stock icon generator uses the same representation to render its inventory icon.
+- `ColliderBox` is a local center and full size in metres. Each axis must be at least 5 mm. The native drop allocates a box and rigidbody. Stock mass, inventory volume and pickup eligibility come from the template. The game computes rigidbody inertia from its render bounds.
+- Keel copies mesh data during registration. The mod owns the source asset. Keep the same key and revision for art updates that preserve the item's meaning. Use the matching mod and item registry for saves.
+
+Invalid or disabled custom representations skip those item declarations, with a warning in the loader log. Mods that want a stock presentation can declare the three-argument form deliberately. This avoids silently replacing an item's requested collision bounds with a template's bounds.

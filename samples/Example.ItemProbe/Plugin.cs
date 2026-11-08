@@ -1,10 +1,13 @@
 using System;
+using System.Reflection;
 using System.Text;
 using BepInEx;
 using Game;
 using Manager;
 using MessagePack;
 using Sevo.Framework.Runtime;
+using UnityEngine;
+using UnityEngine.Rendering;
 using VoxelEngine;
 using World;
 
@@ -23,11 +26,17 @@ namespace Sevo.Example.ItemProbe
         private bool checkedTables;
         private bool checkedRoundTrip;
         private bool checkedRecipes;
+        private bool visualProbe;
+        private static readonly Color32 ProbeTint = new Color32(245, 62, 140, 255);
+        private static readonly Bounds ProbeBox = new Bounds(new Vector3(0.04f, 0, 0),
+            new Vector3(0.16f, 0.18f, 0.20f));
 
         private void Awake()
         {
+            visualProbe = Environment.GetEnvironmentVariable("SEVO_KEEL_ITEM_VISUAL_PROBE") == "1";
             ItemRegistration.Register(Owner, "dust", 1, () =>
-                new ItemDefinition(StockTemplate, "Probe Dust", "A custom part for testing Keel item registration."));
+                new ItemDefinition(StockTemplate, "Probe Dust", "A custom part for testing Keel item registration.",
+                    visualProbe ? CreateVisual() : null));
             ItemRegistration.Register(Owner, "grit", 1, () =>
                 new ItemDefinition(StockTemplate, "Probe Grit", "A second item sharing the dust's stock template."));
             RecipeRegistration.Register(Owner, "make_dust", 1, () =>
@@ -89,6 +98,7 @@ namespace Sevo.Example.ItemProbe
                 return;
 
             checkedRoundTrip = true;
+            if (visualProbe) VerifyVisual(dust);
             var raw = dust.SaveData;
             var saved = MessagePackSerializer.Deserialize<ItemSaveData>(MessagePackSerializer.Serialize(raw));
             var identity = saved.data == null ? Array.Empty<string>() : Encoding.UTF8.GetString(saved.data).Split('\0');
@@ -120,6 +130,92 @@ namespace Sevo.Example.ItemProbe
             RequireRejected(saved, "revision");
 
             Logger.LogInfo($"KEEL_ITEM_LOAD PASS dust={dust.prefabId} grit={grit.prefabId}");
+        }
+
+        private static ItemVisualDefinition CreateVisual()
+        {
+            var mesh = new Mesh { name = "Keel probe component" };
+            mesh.vertices = new[] { new Vector3(-0.23f, -0.09f, -0.12f), new Vector3(0.23f, -0.09f, -0.12f),
+                new Vector3(0f, -0.09f, 0.18f), new Vector3(0.08f, 0.25f, 0.02f) };
+            mesh.triangles = new[] { 0, 1, 2, 0, 3, 1, 1, 3, 2, 2, 3, 0 };
+            mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.up, new Vector2(0.5f, 0.5f) };
+            mesh.RecalculateNormals();
+            mesh.RecalculateTangents();
+            return new ItemVisualDefinition(mesh, ProbeTint, ProbeBox);
+        }
+
+        private void VerifyVisual(ItemInstanceData item)
+        {
+            var native = ItemInstanceRenderResources.PrefabDatas[item.prefabId];
+            var stock = ItemInstanceRenderResources.PrefabDatas[(int)StockTemplate];
+            if (native.renderData.clusterStart <= stock.renderData.clusterStart || native.renderData.clusterCount != 1
+                || native.triangleTreeId != 0 || !native.useColliderBounds || native.mass != stock.mass
+                || native.volume != stock.volume || !item.CanBePickedUp(StorageCommon.CONTEXT))
+                throw new InvalidOperationException("Unexpected item mesh, pickup or physical table.");
+
+            var player = Dependency.PlayerManager.SkyTransform;
+            item.Register();
+            var position = player.SystemPosition + new Vector3l(player.Data.rotation * (Vector3.forward * 8f));
+            GameObject? previewObject = null;
+            try
+            {
+                item.AllocateAllComponents(new SkyTransformData { systemPosition = position, rotation = Quaternion.identity, scale = 1f });
+                var collider = WorldCollider.BVHSet.Elements[item.worldColliderId];
+                var colliderBox = collider.ownBounds.ToBounds();
+                if (item.rigidbodyId == 0 || collider.shape != ColliderShapeCommon.Shape.box || collider.triangleTreeId != 0
+                    || (colliderBox.center - ProbeBox.center).sqrMagnitude > 0.000001f
+                    || (colliderBox.size - ProbeBox.size).sqrMagnitude > 0.000001f)
+                    throw new InvalidOperationException("Native dropped item did not allocate its independent box and rigidbody.");
+                VerifyRender(GlobalRenderer.renderer, item.renderId1, native.renderData.clusterStart);
+
+                previewObject = new GameObject("Keel native item preview probe");
+                var preview = previewObject.AddComponent<ItemPreview>();
+                preview.SetNewItem(new WorldItemPlayer(item.id));
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var renderer = (EvoRenderer)typeof(ItemPreview).GetField("evoRenderer", flags)!.GetValue(preview)!;
+                var previewItem = (ItemInstanceData)typeof(ItemPreview).GetField("previewItemData", flags)!.GetValue(preview)!;
+                VerifyRender(renderer, previewItem.renderId1, native.renderData.clusterStart);
+                preview.SetNewItem(null!);
+            }
+            finally
+            {
+                if (previewObject != null) Destroy(previewObject);
+                WorldItemPlayer.WorldItems.Remove(item.id);
+                item.ReleaseComponentsAndItemId(unlinkTerrain: false);
+            }
+            Logger.LogInfo($"KEEL_ITEM_VISUAL PASS prefab={item.prefabId} cluster={native.renderData.clusterStart} box={ProbeBox.size}");
+            VerifyInventoryIcon(item.prefabId);
+        }
+
+        private void VerifyInventoryIcon(int prefabId)
+        {
+            var atlas = Shader.GetGlobalTexture("ITEM_ICON_TEX") as Texture2DArray;
+            if (atlas == null || !Item.WorldItemIndex.TryGetValue((WorldPropCommon.WorldPropId)prefabId, out var codex)
+                || codex.SpriteItemID >= atlas.depth)
+                throw new InvalidOperationException("The stock icon atlas did not include the sample recipe's item.");
+            var request = AsyncGPUReadback.Request(atlas, 0, 0, atlas.width, 0, atlas.height, codex.SpriteItemID, 1,
+                TextureFormat.RGBA32);
+            request.WaitForCompletion();
+            if (request.hasError) throw new InvalidOperationException("Could not read the generated item icon.");
+            var pixels = request.GetData<Color32>();
+            int opaque = 0;
+            int tinted = 0;
+            foreach (var pixel in pixels)
+            {
+                if (pixel.a < 32) continue;
+                opaque++;
+                if (pixel.r > pixel.g + 12 && pixel.b > pixel.g + 5) tinted++;
+            }
+            if (opaque < 16 || tinted < opaque / 10)
+                throw new InvalidOperationException($"Native icon did not render the tinted item. opaque={opaque} tinted={tinted}");
+            Logger.LogInfo($"KEEL_ITEM_ICON PASS slice={codex.SpriteItemID} opaque={opaque} tinted={tinted}");
+        }
+
+        private static void VerifyRender(EvoRenderer renderer, int renderId, int cluster)
+        {
+            var render = renderer.GetElement(renderId);
+            if (render.clusterStart != cluster || ItemInstanceRenderResources.datas[render.dataId].color != ProbeTint.GammaToLinear().Pack())
+                throw new InvalidOperationException("Native item renderer did not submit the custom mesh and tint.");
         }
 
         private static void RequireRejected(ItemSaveData saved, string mismatch)

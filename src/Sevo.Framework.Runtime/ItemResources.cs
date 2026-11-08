@@ -94,6 +94,7 @@ namespace Sevo.Framework.Runtime
         internal static bool Owns(int id)
         {
             if (installed is not { ready: true } resources || resources.mainThreadId != Environment.CurrentManagedThreadId
+                || resources.saveIdentities?.ContainsKey(id) != true
                 || !resources.owned.TryGetValue(id, out var item))
                 return false;
             var native = ItemInstanceRenderResources.PrefabDatas;
@@ -152,6 +153,7 @@ namespace Sevo.Framework.Runtime
             }
 
             var rows = new List<(int Id, PrefabData OldData, WorldProp OldManaged, WorldProp OldIndex, PrefabData NewData)>();
+            var visuals = new List<(int Id, ItemVisualResources.MeshRow Mesh, PrefabData Stock)>();
             foreach (var pair in owned)
             {
                 var item = pair.Value;
@@ -166,6 +168,24 @@ namespace Sevo.Framework.Runtime
                 if (item.Prop == null || !ReferenceEquals(StockMesh.GetValue(item.Prop), StockMesh.GetValue(managed[template])))
                     throw new InvalidOperationException($"Managed item {id} lost its stock template mesh during resource reload.");
                 rows.Add((id, data, managed[id], index[id], row));
+                if (item.Visual != null) visuals.Add((id, item.Visual, row));
+            }
+            try
+            {
+                ItemVisualResources.Bind(visuals);
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    var visual = owned[row.Id].Visual;
+                    if (visual == null) continue;
+                    row.NewData = visual.Apply(row.NewData);
+                    rows[i] = row;
+                }
+            }
+            catch (Exception exception)
+            {
+                warn("Keel item visuals unavailable: " + exception.Message);
+                rows.RemoveAll(row => owned[row.Id].Visual != null);
             }
             int written = 0;
             try
@@ -192,24 +212,31 @@ namespace Sevo.Framework.Runtime
             }
             foreach (var row in rows) owned[row.Id].LastPublished = row.NewData;
 
+            var active = rows.Select(row => row.Id).ToHashSet();
+            var activeIds = publishedIds.Where(pair => active.Contains(pair.Value))
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
             ready = true;
-            saveIdentities = owned.ToDictionary(pair => pair.Key, pair => pair.Value.SaveIdentity);
-            ItemRegistration.Publish(publishedIds);
-            foreach (var pair in publishedIds)
+            saveIdentities = owned.Where(pair => active.Contains(pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value.SaveIdentity);
+            ItemRegistration.Publish(activeIds);
+            foreach (var pair in activeIds)
                 warn($"Keel registered native item '{pair.Key}' (prefab {pair.Value}).");
         }
 
         private void Prepare(WorldProp[] managed, WorldProp[] index, string? json)
         {
             var native = ItemInstanceRenderResources.PrefabDatas;
-            var plans = new List<(ItemDeclaration Declaration, ItemDefinition Definition)>();
+            var plans = new List<(ItemDeclaration Declaration, ItemDefinition Definition, ItemVisualResources.MeshRow? Visual)>();
             foreach (var declaration in declarations!)
             {
                 try
                 {
                     var definition = declaration.Describe() ?? throw new InvalidOperationException("Factory returned no item definition.");
                     ReadTemplate(definition.StockTemplate, managed, index);
-                    plans.Add((declaration, definition));
+                    if (definition.Visual != null && !ItemVisualResources.Enabled)
+                        throw new InvalidOperationException("Requires the optional item visuals capability.");
+                    var visual = definition.Visual == null ? null : new ItemVisualResources.MeshRow(definition.Visual);
+                    plans.Add((declaration, definition, visual));
                 }
                 catch (Exception exception)
                 {
@@ -245,7 +272,7 @@ namespace Sevo.Framework.Runtime
                     AccessTools.DeclaredField(typeof(WorldProp), "description").SetValue(clone, plan.Definition.Description);
                     clone.name = plan.Declaration.Key;
                     clone.worldItemType = WorldItemType.craftingParts;
-                    owned.Add(id, new PublishedItem(plan.Declaration, plan.Definition, clone, profile.ProfileId));
+                    owned.Add(id, new PublishedItem(plan.Declaration, plan.Definition, plan.Visual, clone, profile.ProfileId));
                     publishedIds.Add(plan.Declaration.Key, id);
                 }
 
@@ -335,12 +362,15 @@ namespace Sevo.Framework.Runtime
         {
             internal ItemDefinition Definition { get; }
             internal WorldProp Prop { get; }
+            internal ItemVisualResources.MeshRow? Visual { get; }
             internal byte[] SaveIdentity { get; }
             internal PrefabData LastPublished { get; set; }
 
-            internal PublishedItem(ItemDeclaration declaration, ItemDefinition definition, WorldProp prop, Guid profileId)
+            internal PublishedItem(ItemDeclaration declaration, ItemDefinition definition, ItemVisualResources.MeshRow? visual,
+                WorldProp prop, Guid profileId)
             {
                 Definition = definition;
+                Visual = visual;
                 Prop = prop;
                 var identity = FormattableString.Invariant($"{profileId:D}\0{declaration.Revision}\0{declaration.Key}");
                 SaveIdentity = SavePrefix.Concat(Encoding.UTF8.GetBytes(identity)).ToArray();

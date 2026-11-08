@@ -7,6 +7,8 @@ $ErrorActionPreference = 'Stop'
 $runtime = [Reflection.Assembly]::LoadFrom((Join-Path $Root $RuntimeAssembly))
 $audit = $runtime.GetType('Sevo.Framework.Runtime.ContractAudit').GetMethod('EvaluateItems')
 if ($null -eq $audit) { throw 'FAIL: native item contract capability is missing.' }
+$visualAudit = $runtime.GetType('Sevo.Framework.Runtime.ContractAudit').GetMethod('EvaluateItemVisuals')
+if ($null -eq $visualAudit) { throw 'FAIL: item representation contract capability is missing.' }
 
 $assembly = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $Root '.refs/game/Assembly-CSharp.dll'))
 try {
@@ -54,4 +56,24 @@ try {
     $guard.Previous.Operand = $savedOperand
 
     Assert-Capability $true 'restored contracts'
+    function Assert-VisualCapability([bool]$Expected, [string]$Case) {
+        $result = $visualAudit.Invoke($null, @($module))
+        if ($result.Available -ne $Expected) { throw "FAIL: $Case -- $($result.Reason)" }
+        Write-Output "PASS: $Case"
+    }
+    Assert-VisualCapability $true 'item representation accepts unrelated MVID change'
+    $preview = $module.GetType('VoxelEngine.ItemPreview').Methods | Where-Object Name -eq 'ComputeGeoItem'
+    $submission = $preview.Body.Instructions | Where-Object {
+        $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'SetRenderData' -and $_.Operand.DeclaringType.FullName -eq 'Game.ItemInstanceData'
+    }
+    $savedOpcode = $submission.OpCode
+    $submission.OpCode = [Mono.Cecil.Cil.OpCodes]::Nop
+    Assert-VisualCapability $false 'preview no longer uses the native item renderer'
+    Assert-Capability $true 'preview contract drift leaves basic item registration available'
+    $submission.OpCode = $savedOpcode
+    $packedNormal = $module.GetType('World.PropMeshData').Fields | Where-Object Name -eq 'normal'
+    $packedNormal.Name = 'changedNormalLayout'
+    Assert-VisualCapability $false 'native GPU vertex layout changed'
+    $packedNormal.Name = 'normal'
+    Assert-VisualCapability $true 'restored item representation contracts'
 } finally { $assembly.Dispose() }

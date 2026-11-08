@@ -1,5 +1,9 @@
 # Starship Keel changelog
 
+## Unreleased
+
+- Added an opt-in item representation for caller-owned meshes, tint through the stock item material, and separate box colliders. The native 3D inventory preview and dropped item use the same representation.
+
 ## 0.1.7 preview
 
 - Added opt-in registration of distinct, namespaced crafting items backed by validated stock assets. Mods can use registered items as native crafting inputs or outputs.

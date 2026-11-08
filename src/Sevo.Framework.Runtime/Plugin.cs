@@ -73,6 +73,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult codexCapability;
                 CapabilityResult recipes;
                 CapabilityResult items;
+                CapabilityResult itemVisuals;
                 CapabilityResult gathering;
                 CapabilityResult fluids;
                 CapabilityResult oreGeneration;
@@ -100,6 +101,7 @@ namespace Sevo.Framework.Runtime
                     codexCapability=ContractAudit.EvaluateCodexCategories(metadata.MainModule,out codexMenus);
                     recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
                     items = ContractAudit.EvaluateItems(metadata.MainModule);
+                    itemVisuals = ContractAudit.EvaluateItemVisuals(metadata.MainModule);
                     gathering = ContractAudit.EvaluateGathering(metadata.MainModule);
                     fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
                     oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
@@ -136,6 +138,10 @@ namespace Sevo.Framework.Runtime
                         return items;
                     },
                     () => ItemResources.Disable());
+                if (itemVisuals.Available && !items.Available)
+                    itemVisuals = new CapabilityResult(itemVisuals.Name, false, "Requires the item registration hook.");
+                itemVisuals = InstallContentHook(itemVisuals, "EnableItemVisuals", "ITEM_VISUALS",
+                    () => InstallContentHookPatches(itemVisuals, ItemVisualResources.Install, ItemVisualResources.Disable));
                 if (gathering.Available && !items.Available)
                     gathering = new CapabilityResult(gathering.Name, false, "Requires the item registration hook.");
                 gathering = InstallContentHook(gathering, "EnableGatheringDrops", "GATHERING",
@@ -167,7 +173,7 @@ namespace Sevo.Framework.Runtime
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, items, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
+                    codexCapability, items, itemVisuals, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

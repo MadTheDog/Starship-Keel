@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Game;
 using Sevo.Framework.Sdk;
+using UnityEngine;
 using VoxelEngine;
 using World;
 
@@ -14,8 +15,15 @@ namespace Sevo.Framework.Runtime
         public WorldPropCommon.WorldPropId StockTemplate { get; }
         public string DisplayName { get; }
         public string Description { get; }
+        public ItemVisualDefinition? Visual { get; }
 
         public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description)
+            : this(stockTemplate, displayName, description, null)
+        {
+        }
+
+        public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description,
+            ItemVisualDefinition? visual)
         {
             if ((int)stockTemplate <= 0 || !Enum.IsDefined(typeof(WorldPropCommon.WorldPropId), stockTemplate))
                 throw new ArgumentOutOfRangeException(nameof(stockTemplate));
@@ -27,6 +35,23 @@ namespace Sevo.Framework.Runtime
             StockTemplate = stockTemplate;
             DisplayName = displayName;
             Description = description;
+            Visual = visual;
+        }
+    }
+
+    /// <summary>A readable mesh in local metres with a stock material tint and independent native box collider.</summary>
+    public sealed class ItemVisualDefinition
+    {
+        public Mesh Mesh { get; }
+        public Color32 Tint { get; }
+        public Bounds ColliderBox { get; }
+
+        public ItemVisualDefinition(Mesh mesh, Color32 tint, Bounds colliderBox)
+        {
+            if (mesh == null) throw new ArgumentNullException(nameof(mesh));
+            Mesh = mesh;
+            Tint = new Color32(tint.r, tint.g, tint.b, 255);
+            ColliderBox = colliderBox;
         }
     }
 
