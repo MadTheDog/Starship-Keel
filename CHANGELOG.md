@@ -25,6 +25,8 @@
 - Added opt-in planet and moon material bands relative to the native nominal body radius.
 - Added read-only galaxy catalog checks for installed asset references, loaded aliases, and selected save identity.
 - Added an opt-in Creative solo prototype for flush placement of registered item fittings against stock cargo faces.
+- Added opt-in selectable pass-through geometry for stock-backed item and fluid fittings and passive hull shapes. Native placement overlap, targeting, and conveyor routing remain available.
+- Keep the expanded attachment specular atlas alive across stock world loading so native blocks and mod-authored palettes retain their specular and emission data.
 - Added depth bands against a deterministic, mod-supplied surface for fresh solid planet and moon samples.
 - Verified a bounded stock terrain survey reproduced its canonical density after restart and applied depth bands across two terrain detail levels.
 - Verified native terrain atlas replacement at GPU mips 0 and 4. The separate starter-planet color bake retained identical coarse face textures.
@@ -38,10 +40,11 @@
 - Verified native HUD marker movement and cleanup and selection of a separate tracked contact.
 - Verified simultaneous camera follow and sublight input, then stock pilot re-entry, exit and exact grid cleanup.
 - Verified native destination loading and fresh-process character reload reproduce the same appended planet and moon layout.
+- Verified a stock ship under native thrust crossed a published galaxy gate route, cleared the generated destination gate, and saved the destination star.
 
 ### Current limits
 
-- Galaxy publication is solo-only and requires a dedicated marked save root. Physical gate travel needs separate acceptance.
+- Galaxy publication is solo-only and requires a dedicated marked save root. Gate transit was verified in one direction.
 - Surface depth uses a supplied or surveyed field. Keel does not infer a global stock height field from streamed terrain.
 - Camera follow and sublight control support a loaded ship within the documented local-player bounds. Full remote possession and NPC or generated wreck ownership transfer still require verified native transitions.
 

@@ -43,6 +43,8 @@ WithMissingCall("VoxelEngine.ActionBuild", "IsColliding", "IsOverlapping");
 WithMissingCall("Manager.SkyPhysics/QueryOverlapAabb", "OnElementIntersect", "IsOverlapValid");
 WithMissingCall("NetworkedBuilder", "UserCode_RpcVoxelAction", "DoAction");
 WithMissingCall("VoxelEngine.ActionBuild", "ConsumeQuantityForBuild", "get_IsSurvival");
+WithMissingCall("VoxelEngine.ActionSymmetry", "BuildBrick", "ConsumeQuantityForBuild");
+WithMissingCall("VoxelEngine.ActionBuild", "CanBuild", "IsColliding");
 var geometry = typeof(ContractAudit).Assembly.GetType("Sevo.Framework.Runtime.FlushPortGeometry", throwOnError: true)!
     .GetMethod("IsAligned", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 bool Aligned(Vector3 point, Vector3 normal)

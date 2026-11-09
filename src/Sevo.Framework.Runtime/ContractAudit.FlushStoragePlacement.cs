@@ -36,7 +36,13 @@ namespace Sevo.Framework.Runtime
                 var apply = ContextMethod(module, builder, "DoAction", false, @void, action + "&", boolean, integer);
                 var add = ContextMethod(module, "VoxelEngine.EntityBricks", "Add", false, integer, instance);
                 var click = ContextMethod(module, build, "LeftClickUp", false, @void);
-                var consume = module.GetType(build)?.Methods.SingleOrDefault(method => method.Name == "ConsumeQuantityForBuild");
+                var mirrorBuild = ContextMethod(module, "VoxelEngine.ActionSymmetry", "BuildBrick", false, @void, action, integer);
+                var submit = ContextMethod(module, builder, "LocalVoxelAction", false, @void, action, boolean, integer);
+                var canBuild = ContextMethod(module, build, "CanBuild", false, boolean);
+                const string symmetryPlane = "VoxelEngine.SymmetryPlane";
+                var symmetry = ContextMethod(module, "VoxelEngine.EntitySymmetry", "OnPlayerVoxelAction", false,
+                    boolean, action + "&", symmetryPlane, symmetryPlane, symmetryPlane);
+                var consume = ContextMethod(module, build, "ConsumeQuantityForBuild", true, boolean, instance, integer);
                 var isSurvival = ContextMethod(module, "PlayerState", "get_IsSurvival", true, boolean);
                 var tree = module.GetType("Common.BVHSet`1") ?? throw new InvalidOperationException("Missing native overlap traversal.");
                 var overlapObb = tree.Methods.Single(method => method.Name == "OverlapOBB");
@@ -59,8 +65,12 @@ namespace Sevo.Framework.Runtime
                     || !HasFlushField(predicate, "isTankJoin") || !HasFlushField(predicate, "hasTank")
                     || !HasFlushField(collector, "brickData") || !HasFlushField(collector, "transformId")
                     || !ContextCalls(rpc, apply) || !ContextCalls(apply, add)
-                    || consume == null || !ContextCalls(click, consume) || !ContextCalls(consume, isSurvival)
-                    || !HasFlushCall(click, "LocalVoxelAction"))
+                    || !ContextCalls(consume, isSurvival) || !FlushDebitPrecedesSubmit(click, consume, submit)
+                    || !FlushDebitPrecedesSubmit(mirrorBuild, consume, submit)
+                    || !ContextCalls(canBuild, preview)
+                    || !canBuild.Body.Instructions.Any(instruction => IsFlushField(instruction, Code.Stsfld, build, "isColliding"))
+                    || !click.Body.Instructions.Any(instruction => IsFlushField(instruction, Code.Ldsfld, build, "isColliding"))
+                    || !HasFlushSymmetryGuard(symmetry))
                     throw new InvalidOperationException("Native creative placement, overlap or commit path changed.");
 
                 return new CapabilityResult(capability, true, "Managed flush collision and creative commit paths validated.");
@@ -70,6 +80,26 @@ namespace Sevo.Framework.Runtime
                 return new CapabilityResult(capability, false, exception.Message);
             }
         }
+
+        private static bool FlushDebitPrecedesSubmit(MethodDefinition method, MethodDefinition debit, MethodDefinition submit)
+        {
+            var calls = method.Body.Instructions.Where(instruction => instruction.OpCode.Code is Code.Call or Code.Callvirt
+                && instruction.Operand is MethodReference target && (target.FullName == debit.FullName
+                    || target.FullName == submit.FullName)).Select(instruction => ((MethodReference)instruction.Operand).FullName);
+            return calls.SequenceEqual(new[] { debit.FullName, submit.FullName });
+        }
+
+        private static bool HasFlushSymmetryGuard(MethodDefinition method)
+        {
+            var guard = method.Body.Instructions.SingleOrDefault(instruction =>
+                IsFlushField(instruction, Code.Ldfld, "VoxelEngine.Brick", "NoMirroring"));
+            return guard?.Next?.OpCode.Code is Code.Brfalse or Code.Brfalse_S
+                && guard.Next.Next?.OpCode.Code == Code.Ldc_I4_0 && guard.Next.Next.Next?.OpCode.Code == Code.Ret;
+        }
+
+        private static bool IsFlushField(Instruction instruction, Code code, string type, string name)
+            => instruction.OpCode.Code == code && instruction.Operand is FieldReference field
+                && field.Name == name && field.DeclaringType.FullName == type;
 
         private static bool HasFlushCall(MethodDefinition method, string name)
             => method.HasBody && method.Body.Instructions.Any(instruction =>

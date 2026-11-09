@@ -21,6 +21,7 @@ For an attachment or other visual supported by the [attachment API](KEEL-WEAPON-
 - Keep assets and visual choices in the owning mod. Keep stock resources and the contents of other mods' rows and layers untouched.
 - A Keel mod must leave writes to the voxel material table, its cursor and GPU buffer, the voxel diffuse alias, and the global diffuse and specular texture bindings to the runtime. A private Harmony patch that changes these bypasses Keel's registration contract.
 - A legacy atlas extension can coexist if it preserves the layout, Keel-owned rows and their indices, and every mip of the layers those rows reference. Any replacement must also keep the CPU diffuse alias and the shader binding in agreement. Keel checks the managed bindings and readable mip data at readiness and stock world entry. Mods that bypass the contract remain responsible for coherent GPU uploads and for their own content.
+- Keel retains the expanded attachment atlases across stock world loads. Verify their bindings after the game unloads unused assets during character entry.
 - A conflict diagnostic names the registered palettes and first mismatched binding. If preparation cannot safely publish a custom palette, Keel uses the baked fallback. If bindings become incompatible after publication, restart with a compatible profile. The stock new-character, saved-character, and lobby buttons stay at the menu rather than starting a session with those bindings.
 
 ## Mod author checks

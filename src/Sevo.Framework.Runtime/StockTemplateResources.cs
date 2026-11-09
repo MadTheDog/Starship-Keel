@@ -216,7 +216,8 @@ namespace Sevo.Framework.Runtime
             if (argsField?.GetValue(brick) is not object[] recipe
                 || resizeModeField?.GetValue(brick) is not ResizeMode resizeMode || !resizeMode.Equals(template.VoxelMesh.ResizeMode)
                 || !string.Equals(brick.nameMesh, template.nameMesh, StringComparison.Ordinal)
-                || brick.SubShapes != null || brick.IsDecal || brick.IsCollisionOff || brick.colliderShape != template.colliderShape
+                || brick.SubShapes != null || brick.IsDecal || brick.IsCollisionOff != SelectablePassThrough.IsOwned(brick)
+                || brick.colliderShape != template.colliderShape
                 || brick.isRepeatBrick!=template.isRepeatBrick || brick.hasRepeatBrick!=template.hasRepeatBrick || brick.childrenBrickID != 0
                 || !brick.boundsOverride.Equals(template.boundsOverride) || !brick.boundsCulling.Equals(template.boundsCulling)
                 || brick.isDynamicGridSize != template.isDynamicGridSize || brick.gridLevel != template.gridLevel

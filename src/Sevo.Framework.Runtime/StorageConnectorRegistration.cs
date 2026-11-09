@@ -32,8 +32,23 @@ namespace Sevo.Framework.Runtime
             Func<Brick?> selectTemplate)
             => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, ItemStorageType.tube, flush: true);
 
+        /// <summary>Declares a fitting with stock placement and selection, and without physical contact.</summary>
+        public static void RegisterPassThrough(string ownerId, string localName, int revision, string displayName,
+            Func<Brick?> selectTemplate, ItemStorageType transportType)
+        {
+            if (transportType != ItemStorageType.tube && transportType != ItemStorageType.fuelPipe)
+                throw new ArgumentOutOfRangeException(nameof(transportType), "Only item tubes and fluid pipes are supported.");
+            RegisterCore(ownerId, localName, revision, displayName, selectTemplate, transportType, passThrough: true);
+        }
+
+        /// <summary>Declares a Creative flush item fitting with optional selectable pass-through geometry.</summary>
+        public static void RegisterFlushItemFitting(string ownerId, string localName, int revision, string displayName,
+            Func<Brick?> selectTemplate, bool passThrough)
+            => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, ItemStorageType.tube,
+                flush: true, passThrough: passThrough);
+
         private static void RegisterCore(string ownerId, string localName, int revision, string displayName,
-            Func<Brick?> selectTemplate, ItemStorageType? transportType, bool flush = false)
+            Func<Brick?> selectTemplate, ItemStorageType? transportType, bool flush = false, bool passThrough = false)
         {
             if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.", nameof(displayName));
             if (selectTemplate == null) throw new ArgumentNullException(nameof(selectTemplate));
@@ -61,7 +76,7 @@ namespace Sevo.Framework.Runtime
                     maxGridSize = template.maxGridSize,
                     gridLockOffset = template.gridLockOffset,
                     IsFacingForward = template.IsFacingForward,
-                    NoMirroring = template.NoMirroring,
+                    NoMirroring = flush || template.NoMirroring,
                     scaleUV = template.scaleUV,
                     massForUnitShape = template.massForUnitShape,
                     useMaterial = template.useMaterial,
@@ -75,12 +90,14 @@ namespace Sevo.Framework.Runtime
                     allowPipeOverlap = template.allowPipeOverlap
                 };
                 brick.Tab(CodexTab.PIPES);
+                if (passThrough) SelectablePassThrough.Configure(brick);
                 Bindings[id] = new Binding(brick, template, type, ports!);
                 if (flush) FlushStoragePlacement.Bind(brick);
                 return brick;
             }, () =>
             {
                 if (!enabled) return "Native storage connectors are unavailable or disabled.";
+                if (passThrough && !SelectablePassThrough.Enabled) return "Selectable pass-through geometry is unavailable or disabled.";
                 if (selectTemplate() is not BrickPipe template || template.GetType() != typeof(BrickPipe)
                     || (uint)template.brickID >= Brick.BRICK_INDEX.Length
                     || !ReferenceEquals(Brick.BRICK_INDEX[template.brickID], template)

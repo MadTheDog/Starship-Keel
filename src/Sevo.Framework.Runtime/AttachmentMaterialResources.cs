@@ -68,6 +68,9 @@ namespace Sevo.Framework.Runtime
                 foreach(var palette in prepared) Array.Copy(palette.rows,0,rows,palette.rows[0].Id,palette.rows.Length);
                 diffuse=Expand(stockDiffuse,textures.ConvertAll(pair=>pair.diffuse));
                 specular=Expand(stockSpecular,textures.ConvertAll(pair=>pair.specular));
+                // The global shader binding alone does not keep a runtime texture alive during world loading.
+                // The diffuse atlas already has a native owner through ResourcesLoader.VOXEL_DIFFUSE.
+                specular.hideFlags |= HideFlags.DontUnloadUnusedAsset;
                 if(nativeBuffer.GetValue(null)!=null || !ReferenceEquals(stockRows,VoxelMaterialResources.materialParamDatas)
                     || cursor!=VoxelMaterialResources.MaterialCount || stockDiffuse!=ResourcesLoader.VOXEL_DIFFUSE
                     || stockDiffuse!=Shader.GetGlobalTexture(DiffuseName) || stockSpecular!=Shader.GetGlobalTexture(SpecularName))

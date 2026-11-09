@@ -87,6 +87,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult terrainMaterials;
                 CapabilityResult storageConnectors;
                 CapabilityResult flushStoragePlacement;
+                CapabilityResult selectablePassThrough;
                 CapabilityResult nativeBlockVariants;
                 CapabilityResult contextActions;
                 CapabilityResult inventoryViews;
@@ -155,6 +156,7 @@ namespace Sevo.Framework.Runtime
                     terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
                     storageConnectors = ContractAudit.EvaluateStorageConnectors(metadata.MainModule);
                     flushStoragePlacement = ContractAudit.EvaluateFlushStoragePlacement(metadata.MainModule);
+                    selectablePassThrough = ContractAudit.EvaluateSelectablePassThrough(metadata.MainModule);
                     nativeBlockVariants = ContractAudit.EvaluateNativeBlockVariants(metadata.MainModule);
                     contextActions = ContractAudit.EvaluateContextActions(metadata.MainModule);
                     inventoryViews = ContractAudit.EvaluateInventoryViews(metadata.MainModule);
@@ -354,6 +356,10 @@ namespace Sevo.Framework.Runtime
                     flushStoragePlacement = new CapabilityResult(flushStoragePlacement.Name, false, "Requires native storage connectors.");
                 flushStoragePlacement = InstallContentHook(flushStoragePlacement, "EnableFlushStoragePlacement", "FLUSH_STORAGE_PLACEMENT",
                     () => InstallContentHookPatches(flushStoragePlacement, FlushStoragePlacement.Install, FlushStoragePlacement.Disable));
+                if (!experimental && selectablePassThrough.Available)
+                    selectablePassThrough = new CapabilityResult(selectablePassThrough.Name, false, "Requires managed experimental brick registration.");
+                selectablePassThrough = InstallContentHook(selectablePassThrough, "EnableSelectablePassThrough", "SELECTABLE_PASS_THROUGH",
+                    () => InstallContentHookPatches(selectablePassThrough, SelectablePassThrough.Install, SelectablePassThrough.Disable));
                 if (!experimental && nativeBlockVariants.Available)
                     nativeBlockVariants = new CapabilityResult(nativeBlockVariants.Name, false, "Requires managed experimental brick registration.");
                 nativeBlockVariants = InstallContentHook(nativeBlockVariants, "EnableNativeBlockVariants", "NATIVE_BLOCK_VARIANTS",
@@ -485,7 +491,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -877,10 +883,12 @@ namespace Sevo.Framework.Runtime
             var admitted=new List<ContentDefinition>();
             foreach(var definition in definitions)
             {
-                var failure=definition.PrepareTemplate is { } prepare
-                    ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null,
-                        definition.Kind is not (ContentKind.StorageConnector or ContentKind.NativeBlockVariant))
-                    : hullAvailable ? null : "The legacy stock hull contract is unavailable.";
+                var failure=definition.Kind==ContentKind.Ordinary && !hullAvailable
+                    ? "The stock hull contract is unavailable."
+                    : definition.PrepareTemplate is { } prepare
+                        ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null,
+                            definition.Kind is not (ContentKind.Ordinary or ContentKind.StorageConnector or ContentKind.NativeBlockVariant))
+                        : null;
                 if(failure==null)
                 {
                     if(definition.OwnedRepeat is { } repeat) admitted.Add(repeat);
