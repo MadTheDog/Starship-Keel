@@ -26,4 +26,12 @@ The probe requires a loaded Creative solo session with the lab's Mirror server i
 5. Move back within reach of the native pilot controls. Press **F8**, then use the stock controls to reenter within 15 seconds. The probe submits neutral input while awaiting entry and verifies the old lease stops accepting input after the native pilot takes control. Fly briefly under ordinary input and exit normally.
 6. Retain the BepInEx log and session runtime status. A completed run emits `KEEL_SUBLIGHT_CONTROL_PROBE` with a final `PASS` line, and failures log their exact stage. Restart the lab to repeat the sequence.
 
-The sample does not create or delete grids. It measures a short forward-velocity response and checks lease arbitration. Rotation, fuel consumption, multiplayer, and reload need separate tests. The sample has been compiled against Steam build ID 26451593 / 26w45a. Rendered acceptance is pending.
+Manual mode uses the ship supplied by the operator. Both modes measure a short forward-velocity response and check lease arbitration. Rotation, fuel consumption, multiplayer, and reload need separate tests. The sample has been compiled against Steam build ID 26451593 / 26w45a. Rendered acceptance is pending.
+
+## Automated Hotwing fixture
+
+Set `SEVO_KEEL_SUBLIGHT_PROBE_AUTOMATIC=1` in addition to the launch variables above. Set `SEVO_KEEL_SUBLIGHT_PROBE_CHARACTER` to the exact disposable character name, which must end with a dash and the first eight characters of the managed session ID. Enter that fresh character in free space, unseated, and leave the stock controls untouched.
+
+The fixture selects a clear position 250 m away and uses the stock server loader with the bundled `V27 Hotwing.sevo`. It verifies that the new grid is locally owned and transient and that the one live stock computer resolves its linked yoke and pilot seat. It uses the native server commands to enter and exit that seat, checks the lease gates during those transitions, and waits for stock exit control to finish. It submits the same bounded forward pulse as manual mode, then requests native removal when the exact fixture is unoccupied and detached.
+
+Look for `KEEL_SUBLIGHT_CONTROL_PROBE AUTO_PASS`, or `AUTO_FAIL` with a stage and reason. Use the manual sequence to test operator re-entry and expiry.

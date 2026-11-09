@@ -13,7 +13,7 @@ namespace Sevo.Example.SublightControlProbe
 {
     [BepInPlugin(Id, "Keel Sublight Control Probe", "0.1.0")]
     [BepInDependency(Plugin.Id)]
-    public sealed class Probe : BaseUnityPlugin
+    public sealed partial class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.sublightprobe";
         private const string Prefix = "KEEL_SUBLIGHT_CONTROL_PROBE";
@@ -37,6 +37,7 @@ namespace Sevo.Example.SublightControlProbe
             try
             {
                 ValidateProfile();
+                if (PrepareAutomatic()) return;
                 selectKey = Config.Bind("Probe", "SelectGrid", new KeyboardShortcut(KeyCode.F6),
                     "Select a newly created disposable ship under the stock build crosshair.").Value;
                 pulseKey = Config.Bind("Probe", "ForwardPulse", new KeyboardShortcut(KeyCode.F7),
@@ -69,6 +70,11 @@ namespace Sevo.Example.SublightControlProbe
 
         private void Update()
         {
+            if (automatic)
+            {
+                UpdateAutomatic();
+                return;
+            }
             if (stage == Stage.Off || stage == Stage.Done) return;
             if (PlayerState.InLoadingScreen || PlayerState.IsQuittingToDesktopOrTitle || PlayerState.InMenu)
             {
