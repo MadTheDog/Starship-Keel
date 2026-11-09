@@ -12,9 +12,11 @@ This first contract exposes standard sublight only. Camera, ship possession, tac
 
 The standalone suite tests axis bounds, independence from assembly MVID, and rejection of altered drive and stock post-exit call paths. A rendered disposable solo fixture on Steam build 26451593 / 26w45a loaded the bundled V27 Hotwing and entered and exited through stock authority. It refused the lease before piloting, while piloting, and during the stock post-exit loop. After the exit settled, the lease increased forward velocity by 0.311 m/s while native control mode stayed unoccupied. The fixture returned the pilot to the recorded starting point and removed its test ship. The lab used diagnostic job completion and a temporary Creative tutorial deferral.
 
+A separate rendered stress run verified that stale input was refused after expiry and that stock re-entry revoked a fresh lease. The fixture timed out during cleanup after the second exit.
+
 Use a locally owned powered test ship with a stock computer and unobstructed free space to extend the acceptance checks.
 
 1. Try acquiring before piloting, while piloting and immediately after exiting. Verify rejection. Wait until native exit damping completes, then acquire and compare translation and rotation against stock sublight behavior.
 2. Try acquiring from a second controller and verify exclusivity. Stop input and verify the lease expires. Acquire again, reenter the ship and verify stock input takes precedence without a second drive update.
 3. Repeat with power loss, computer removal, docking, unload and quit. Verify the old lease never resumes after reopening the world.
-4. Compare fuel use and control-mode flags before and after the experiment. Live re-entry, expiry, and fuel-use comparisons still require separate checks.
+4. Compare fuel use and control-mode flags before and after the experiment.
