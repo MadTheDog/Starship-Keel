@@ -143,7 +143,9 @@ namespace Sevo.Example.RecipeProbe
         {
             var state = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
             var session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION");
-            if (Application.companyName != "SEVO Keel Hooks Lab016" || Application.productName != "SEVO HK Test"
+            bool legacyLab = Application.companyName == "SEVO Keel Hooks Lab016" && Application.productName == "SEVO HK Test";
+            bool worldLab = Application.companyName == "SEVO Keel Gen Lab 0110" && Application.productName == "SEVO WG Test";
+            if ((!legacyLab && !worldLab)
                 || state == null || !Guid.TryParseExact(session, "N", out _))
                 throw new InvalidOperationException("This exercise requires the disposable Keel hooks lab.");
             ProfileProtocol.Open(state, Paths.GameRootPath, session);

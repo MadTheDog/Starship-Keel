@@ -10,7 +10,7 @@ using System.Xml;
 
 namespace Sevo.Framework.Sdk
 {
-    public enum ResourceKind { Brick = 1, CollisionShape = 2, Fluid = 3, Schematic = 4, Item = 5 }
+    public enum ResourceKind { Brick = 1, CollisionShape = 2, Fluid = 3, Schematic = 4, Item = 5, TerrainMaterial = 6 }
 
     public sealed class ContentRequest
     {

@@ -49,7 +49,8 @@ public sealed class Plugin : BaseUnityPlugin
             session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION") ?? "";
             var state = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
             Require(Guid.TryParseExact(session, "N", out _) && state != null, "A managed launcher session is required.");
-            Require(Application.companyName == "SEVO Keel Hooks Lab016" && Application.productName == "SEVO HK Test",
+            Require((Application.companyName == "SEVO Keel Hooks Lab016" && Application.productName == "SEVO HK Test")
+                || (Application.companyName == "SEVO Keel Gen Lab 0110" && Application.productName == "SEVO WG Test"),
                 "The probe only operates in the disposable Keel hooks lab.");
             ProfileProtocol.Open(state!, Paths.GameRootPath, session);
             startSolo = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_START_SOLO") == "1";

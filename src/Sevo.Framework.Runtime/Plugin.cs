@@ -12,7 +12,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.9")]
+    [BepInPlugin(Id,"Starship Keel","0.1.10")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -83,7 +83,18 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult fluids;
                 CapabilityResult oreGeneration;
                 CapabilityResult oreScanner;
+                CapabilityResult oreDiscovery;
                 CapabilityResult terrainMaterials;
+                CapabilityResult storageConnectors;
+                CapabilityResult bodyEnvironment;
+                CapabilityResult terrainTextureOverrides;
+                CapabilityResult terrainMaterialRegistration;
+                CapabilityResult celestialLayout;
+                CapabilityResult galaxyCatalogPreview;
+                CapabilityResult terrainPlacement;
+                CapabilityResult terrainMiningDrops;
+                CapabilityResult planetTerrainGeneration;
+                CapabilityResult asteroidTerrainGeneration;
                 using(var metadata=AssemblyDefinition.ReadAssembly(game.Location))
                 {
                     status.AssemblyMvid=metadata.MainModule.Mvid.ToString("D");
@@ -113,7 +124,18 @@ namespace Sevo.Framework.Runtime
                     fluids = ContractAudit.EvaluateFluids(metadata.MainModule);
                     oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
                     oreScanner = ContractAudit.EvaluateOreScanner(metadata.MainModule);
+                    oreDiscovery = ContractAudit.EvaluateOreDiscovery(metadata.MainModule);
                     terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
+                    storageConnectors = ContractAudit.EvaluateStorageConnectors(metadata.MainModule);
+                    bodyEnvironment = ContractAudit.EvaluateBodyEnvironment(metadata.MainModule);
+                    terrainTextureOverrides = ContractAudit.EvaluateTerrainTextureOverrides(metadata.MainModule);
+                    terrainMaterialRegistration = ContractAudit.EvaluateTerrainMaterialRegistration(metadata.MainModule);
+                    celestialLayout = ContractAudit.EvaluateCelestialLayout(metadata.MainModule);
+                    galaxyCatalogPreview = ContractAudit.EvaluateGalaxyCatalogPreview(metadata.MainModule);
+                    terrainPlacement = ContractAudit.EvaluateTerrainPlacement(metadata.MainModule);
+                    terrainMiningDrops = ContractAudit.EvaluateTerrainMiningDrops(metadata.MainModule);
+                    planetTerrainGeneration = ContractAudit.EvaluatePlanetTerrainGeneration(metadata.MainModule);
+                    asteroidTerrainGeneration = ContractAudit.EvaluateAsteroidTerrainGeneration(metadata.MainModule);
                     if(attachmentCapability.Available && !FunctionalStockTemplate.DiscoverReceiverTemplates(metadata.MainModule))
                         attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"No native side-slot receiver layout was found.");
                 }
@@ -184,17 +206,84 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(oreScanner, patches =>
                         OreScannerSnapshots.Install(patches, message => Logger.LogWarning(message)),
                         () => OreScannerSnapshots.Disable()));
+                oreDiscovery = InstallContentHook(oreDiscovery, "EnableOreDiscovery", "ORE_DISCOVERY",
+                    () => InstallContentHookPatches(oreDiscovery, patches =>
+                        OreDiscoveryProvider.Install(patches, message => Logger.LogWarning(message)),
+                        OreDiscoveryProvider.Disable));
                 terrainMaterials = InstallContentHook(terrainMaterials, "EnableTerrainMaterialVisuals", "TERRAIN_MATERIAL_VISUALS",
                     () => InstallContentHookPatches(terrainMaterials, patches =>
                         TerrainMaterialVisuals.Install(patches, message => Logger.LogWarning(message)),
                         () => TerrainMaterialVisuals.Disable()));
+                if (profile != null)
+                {
+                    string? admissionFailure = null;
+                    var admission = new CapabilityResult("worldGenerationAdmission", true, "Managed stock world entry checks.");
+                    InstallContentHookPatches(admission, patches =>
+                        admissionFailure = TerrainMaterialWorldAdmission.Install(patches, game, profile), TerrainMaterialWorldAdmission.Disable);
+                    if (admissionFailure != null)
+                    {
+                        Logger.LogWarning(admissionFailure);
+                        terrainMaterialRegistration = new CapabilityResult(terrainMaterialRegistration.Name, false, admissionFailure);
+                        celestialLayout = new CapabilityResult(celestialLayout.Name, false, admissionFailure);
+                        bodyEnvironment = new CapabilityResult(bodyEnvironment.Name, false, admissionFailure);
+                        terrainPlacement = new CapabilityResult(terrainPlacement.Name, false, admissionFailure);
+                        planetTerrainGeneration = new CapabilityResult(planetTerrainGeneration.Name, false, admissionFailure);
+                        asteroidTerrainGeneration = new CapabilityResult(asteroidTerrainGeneration.Name, false, admissionFailure);
+                        if (TerrainMaterialRegistration.HasPersistentTerrainMaterialState(profile))
+                            Fail("Managed profile needs an unavailable terrain material world-entry guard", new InvalidOperationException(admissionFailure));
+                    }
+                }
+                bodyEnvironment = InstallContentHook(bodyEnvironment, "EnableBodyEnvironment", "BODY_ENVIRONMENT",
+                    () => InstallContentHookPatches(bodyEnvironment, patches =>
+                        BodyEnvironmentProvider.Install(patches, message => Logger.LogWarning(message)),
+                        BodyEnvironmentProvider.Disable));
+                terrainTextureOverrides = InstallContentHook(terrainTextureOverrides, "EnableTerrainTextureOverrides", "TERRAIN_TEXTURE_OVERRIDES",
+                    () => InstallContentHookPatches(terrainTextureOverrides, patches =>
+                        TerrainTextureOverride.Install(patches, message => Logger.LogWarning(message)),
+                        TerrainTextureOverride.Disable));
+                terrainMaterialRegistration = InstallContentHook(terrainMaterialRegistration,
+                    "EnableTerrainMaterialRegistration", "TERRAIN_MATERIAL_REGISTRATION",
+                    () => InstallContentHookPatches(terrainMaterialRegistration,
+                        patches => TerrainMaterialRegistration.Install(patches, profile!, message => Logger.LogWarning(message)),
+                        TerrainMaterialRegistration.Disable));
+                if (terrainMiningDrops.Available && (!items.Available || !terrainMaterialRegistration.Available))
+                    terrainMiningDrops = new CapabilityResult(terrainMiningDrops.Name, false,
+                        "Requires item and terrain material registration.");
+                terrainMiningDrops = InstallContentHook(terrainMiningDrops, "EnableTerrainMiningDrops", "TERRAIN_MINING_DROPS",
+                    () => InstallContentHookPatches(terrainMiningDrops, patches =>
+                        TerrainMiningDropRegistration.Install(patches, message => Logger.LogWarning(message)),
+                        TerrainMiningDropRegistration.Disable));
+                celestialLayout = InstallContentHook(celestialLayout, "EnableCelestialLayout", "CELESTIAL_LAYOUT",
+                    () => InstallContentHookPatches(celestialLayout, patches =>
+                        CelestialLayoutProvider.Install(patches, message => Logger.LogWarning(message)),
+                        CelestialLayoutProvider.Disable));
+                if (galaxyCatalogPreview.Available) GalaxyCatalogPreview.Enable();
+                terrainPlacement = InstallContentHook(terrainPlacement, "EnableTerrainPlacement", "TERRAIN_PLACEMENT",
+                    () => InstallContentHookPatches(terrainPlacement,
+                        patches => TerrainPlacement.Install(patches, message => Logger.LogWarning(message)),
+                        TerrainPlacement.Disable));
+                planetTerrainGeneration = InstallContentHook(planetTerrainGeneration, "EnablePlanetTerrainGeneration", "PLANET_TERRAIN_GENERATION",
+                    () => InstallContentHookPatches(planetTerrainGeneration, patches =>
+                        TerrainGenerationProvider.InstallPlanet(patches, message => Logger.LogWarning(message)),
+                        TerrainGenerationProvider.DisablePlanet));
+                asteroidTerrainGeneration = InstallContentHook(asteroidTerrainGeneration, "EnableAsteroidTerrainGeneration", "ASTEROID_TERRAIN_GENERATION",
+                    () => InstallContentHookPatches(asteroidTerrainGeneration, patches =>
+                        TerrainGenerationProvider.InstallAsteroid(patches, message => Logger.LogWarning(message)),
+                        TerrainGenerationProvider.DisableAsteroid));
+                if (!experimental && storageConnectors.Available)
+                    storageConnectors = new CapabilityResult(storageConnectors.Name, false, "Requires managed experimental brick registration.");
+                storageConnectors = InstallContentHook(storageConnectors, "EnableStorageConnectors", "STORAGE_CONNECTORS",
+                    () => InstallContentHookPatches(storageConnectors, StorageConnectorRegistration.Install,
+                        StorageConnectorRegistration.Disable));
                 if (!experimental && (items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
-                    || oreGeneration.Available || oreScanner.Available || terrainMaterials.Available))
+                    || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
+                    || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, terrainMaterials})
+                    codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -587,7 +676,8 @@ namespace Sevo.Framework.Runtime
             foreach(var definition in definitions)
             {
                 var failure=definition.PrepareTemplate is { } prepare
-                    ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null)
+                    ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null,
+                        definition.Kind!=ContentKind.StorageConnector)
                     : hullAvailable ? null : "The legacy stock hull contract is unavailable.";
                 if(failure==null)
                 {
@@ -619,9 +709,9 @@ namespace Sevo.Framework.Runtime
             status.RegisteredFunctionalBlocks=admitted.Count(definition=>definition.IsFunctional);
             Logger.LogInfo("Experimental definitions admitted: "+status.RegisteredDefinitions+", functional: "+status.RegisteredFunctionalBlocks);
         }
-        private static string? CheckPreparedTemplate(Func<string?> prepare,bool featureAvailable)
+        private static string? CheckPreparedTemplate(Func<string?> prepare,bool featureAvailable,bool requiresFunctional)
         {
-            if(!KeelFunctionalCommand.Enabled) return "Functional commands are unavailable or disabled.";
+            if(requiresFunctional && !KeelFunctionalCommand.Enabled) return "Functional commands are unavailable or disabled.";
             if(!featureAvailable) return "Weapon attachment contracts are unavailable or disabled.";
             try { return prepare(); }
             catch(Exception exception) { return "Native template preparation failed: "+exception.Message; }

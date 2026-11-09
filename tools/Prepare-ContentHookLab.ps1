@@ -3,7 +3,7 @@ param([string]$SourceGame = 'D:\SteamLibrary\steamapps\common\Starship EVO', [sw
 $game = Assert-PlatformChild (Join-Path $PlatformRoot 'lab/game')
 $profile = Assert-PlatformChild (Join-Path $PlatformRoot 'lab/profile')
 $evidence = Assert-PlatformChild (Join-Path $PlatformRoot 'local-evidence/lab-identity.json')
-$company = 'SEVO Keel Hooks Lab016'; $product = 'SEVO HK Test'
+$company = 'SEVO Keel Gen Lab 0110'; $product = 'SEVO WG Test'
 $junction = Join-Path ([Environment]::GetFolderPath('UserProfile')) ('AppData/LocalLow/' + $company)
 
 function Get-SerializedLayout([byte[]]$Bytes) {
@@ -55,7 +55,7 @@ if (!$VerifyOnly) {
     if(Test-Path -LiteralPath $game){throw 'Lab game already exists; preserve it and use -VerifyOnly.'}
     $SourceGame=[IO.Path]::GetFullPath($SourceGame)
     if($SourceGame.StartsWith($PlatformRoot,[StringComparison]::OrdinalIgnoreCase)){throw 'Source must be the explicitly selected read-only game, not this lab'}
-    New-Item -ItemType Directory -Path $game,$profile | Out-Null
+    New-Item -ItemType Directory -Path $game,$profile,(Split-Path -Parent $evidence) -Force | Out-Null
     & robocopy $SourceGame $game /E /COPY:DAT /R:0 /W:0 /XD BepInEx 'Starship EVO_BackUpThisFolder_ButDontShipItWithYourGame' /XF winhttp.dll doorstop_config.ini .doorstop_version changelog.txt /NFL /NDL /NJH /NJS /NP
     if($LASTEXITCODE -gt 7){throw 'Read-only source copy failed'}
     $sourceSettings=Join-Path $SourceGame 'Starship EVO_Data/globalgamemanagers'

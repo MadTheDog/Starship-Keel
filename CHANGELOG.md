@@ -1,5 +1,15 @@
 # Starship Keel changelog
 
+## 0.1.10 in development
+
+- Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.
+- Added experimental terrain texture overrides that preserve stock material IDs and atlas layers.
+- Added an experimental celestial layout provider for targeted radius and orbit overrides and append-only rocky moons.
+- Added experimental stock-backed terrain material registration deterministic terrain material remaps, and material-to-item mining drop bindings.
+- Added a bounded custom ore discovery feed for accepted stock scanner pulses.
+- Added a read-only galaxy catalog planner and native-format preview for mod-supplied candidates.
+- Added experimental stock-backed native storage connector variants for fixed two-port item or fluid fittings.
+
 ## 0.1.9
 
 - Validate Keel-owned material rows and texture mip contents so compatible atlas extensions can coexist with custom attachments.

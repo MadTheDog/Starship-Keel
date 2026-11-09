@@ -27,6 +27,13 @@ if(args.Length>0 && args[0]=="audit") {
  return;
 }
 int checks=0;
+checks += CelestialLayoutTests.Run();
+checks += OreDiscoveryTests.Run();
+checks += BodyEnvironmentTests.Run();
+checks += TerrainGenerationProviderTests.Run();
+checks += GalaxyCatalogTests.Run();
+checks += GalaxyCatalogPinTests.Run();
+checks += TerrainPlacementTests.Run();
 void Check(bool ok,string name) { checks++; if(!ok) throw new Exception(name); }
 void Reject(Action action,string name) { checks++; try { action(); } catch(InvalidOperationException) { return; } throw new Exception(name); }
 ContentRequest R(string key,int revision=1) => new(key,ResourceKind.Brick,revision);
@@ -87,6 +94,7 @@ using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtim
      && method.Name=="CreateHull" && method.Parameters.Last().Name=="codexCategory"),
   "the supported brick factories expose native Codex category selection");
 }
+StorageConnectorAuditTests.Run(game.MainModule, Check);
 var results = Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(results["packedIds"].Available && results["lifecycle"].Available,"current game contracts");
 var hullField=game.MainModule.GetType("VoxelEngine.TabHull").Fields.Single(field=>field.Name=="HULL_A");

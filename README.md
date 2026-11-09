@@ -24,6 +24,8 @@ The 0.1.7 development preview adds opt-in [native crafting items](docs/KEEL-ITEM
 
 The 0.1.8 candidate adds optional meshes, tints and box colliders for registered items and [native machine recipes](docs/KEEL-MACHINE-RECIPES.md) for the Crusher and Arc Furnace.
 
+The 0.1.10 development branch adds opt-in [body environment](docs/KEEL-BODY-ENVIRONMENT.md), [celestial layout](docs/KEEL-CELESTIAL-LAYOUT.md), [planet and asteroid terrain inputs](docs/KEEL-TERRAIN-GENERATION-PROVIDERS.md), [terrain texture overrides](docs/KEEL-TERRAIN-TEXTURES.md), [material registration](docs/KEEL-TERRAIN-MATERIALS.md), [material placement](docs/KEEL-TERRAIN-PLACEMENT.md), [terrain mining drops](docs/KEEL-TERRAIN-MINING-DROPS.md), [custom ore discovery](docs/KEEL-ORE-DISCOVERY.md), and [stock-backed storage connectors](docs/KEEL-STORAGE-CONNECTORS.md). The owning mod supplies its declarations and assets. Use a disposable managed solo profile for these capabilities. The [galaxy catalog preview](docs/KEEL-GALAXY-CATALOG-PREVIEW.md) validates proposed catalogs without replacing the active world catalog.
+
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).

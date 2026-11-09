@@ -11,7 +11,8 @@ param(
     [ValidateSet('ITEMS','GATHERING','RECIPES','FLUIDS','ORE_GENERATION','ORE_SCANNER','TERRAIN_MATERIAL_VISUALS')][string[]]$DisableHook = @(),
     [switch]$DiagnosticJobCompletion,
     [switch]$ScanProbe,
-    [switch]$FluidRoundtrip
+    [switch]$FluidRoundtrip,
+    [ValidatePattern('^[a-z][a-z0-9-]{0,39}$')][string]$ManagedStateName
 )
 . (Join-Path $PSScriptRoot 'Environment.ps1')
 if ($FluidProbe -and ($Mode -ne 'Hooks' -or !$Rendered)) { throw 'The fluid world fixture requires rendered Hooks mode.' }
@@ -20,15 +21,23 @@ $game = Assert-PlatformChild (Join-Path $PlatformRoot 'lab/game')
 $session = [guid]::NewGuid().ToString('N')
 $state = Assert-PlatformChild (Join-Path $PlatformRoot "local-evidence/lab-runs/$session")
 New-Item -ItemType Directory -Path $state | Out-Null
-@{schemaVersion=1;profileId=[guid]::NewGuid().ToString('D');gameDirectory=$game} |
-    ConvertTo-Json -Compress | Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $state 'sevo-runtime-profile.json')
+$managedState = if ($ManagedStateName) {
+    Assert-PlatformChild (Join-Path $PlatformRoot "local-evidence/managed-state/$ManagedStateName")
+} else { $state }
+if (!(Test-Path -LiteralPath $managedState)) { New-Item -ItemType Directory -Path $managedState -Force | Out-Null }
+$marker = Join-Path $managedState 'sevo-runtime-profile.json'
+if (!(Test-Path -LiteralPath $marker)) {
+    if (Get-ChildItem -LiteralPath $managedState -Force | Select-Object -First 1) { throw 'Refusing to initialize a nonempty unmarked managed state directory.' }
+    @{schemaVersion=1;profileId=[guid]::NewGuid().ToString('D');gameDirectory=$game} |
+        ConvertTo-Json -Compress | Set-Content -Encoding utf8NoBOM -LiteralPath $marker
+}
 $executable = Assert-PlatformChild (Join-Path $game 'Starship EVO.exe')
 $start = [Diagnostics.ProcessStartInfo]::new($executable)
 $start.UseShellExecute = $false
 $start.WorkingDirectory = $game
 $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
 $start.CreateNoWindow = $true
-$start.Environment['SEVO_PLATFORM_STATE_DIR'] = $state
+$start.Environment['SEVO_PLATFORM_STATE_DIR'] = $managedState
 $start.Environment['SEVO_PLATFORM_SESSION'] = $session
 $start.Environment['SteamAppId'] = '711980'
 $start.Environment['SteamGameId'] = '711980'
@@ -53,7 +62,7 @@ $loaderLog = Join-Path $game 'BepInEx/LogOutput.log'
 $process = [Diagnostics.Process]::Start($start)
 $started = $process.StartTime
 try {
-    $statusPath = Join-Path $state 'runtime-status.json'
+    $statusPath = Join-Path $managedState 'runtime-status.json'
     $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         if (Test-Path -LiteralPath $statusPath) {
@@ -92,6 +101,9 @@ try {
     $playerLog = Join-Path $state 'player.log'
 $loaderLog = Join-Path $game 'BepInEx/LogOutput.log'
     if (Test-Path -LiteralPath $loaderLog) { Copy-Item -LiteralPath $loaderLog -Destination (Join-Path $state 'bepinex.log') }
+    if ($managedState -ne $state) {
+        Get-ChildItem -LiteralPath $managedState -File -Filter '*.json' | Copy-Item -Destination $state
+    }
     Write-Host "Evidence: $state"
     $process.Dispose()
 }

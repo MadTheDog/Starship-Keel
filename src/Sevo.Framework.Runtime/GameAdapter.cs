@@ -30,7 +30,9 @@ namespace Sevo.Framework.Runtime
                 && StockTemplateResources.IsSupported((Brick)definition,StockShape.HullTemplate(),legacyHull:true);
         }
         public bool IsSupportedPrepared(object definition,ContentKind kind) =>
-            definition is Brick brick && FunctionalStockTemplate.IsSupported(brick,kind);
+            definition is Brick brick && (kind==ContentKind.StorageConnector
+                ? StorageConnectorRegistration.IsSupported(brick)
+                : FunctionalStockTemplate.IsSupported(brick,kind));
 
         public static bool IsStockHullAvailable(out string reason) =>
             StockTemplateResources.IsTemplateAvailable(TabHull.HULL_A,out reason);
@@ -40,7 +42,7 @@ namespace Sevo.Framework.Runtime
             session.VerifyOwnership();
             foreach (var brick in session.Owned.Values.Cast<Brick>().OrderBy(brick=>!brick.isRepeatBrick))
             {
-                if (!FunctionalStockTemplate.TryLoad(brick))
+                if (!StorageConnectorRegistration.TryLoad(brick) && !FunctionalStockTemplate.TryLoad(brick))
                     StockTemplateResources.Load(brick,StockShape.HullTemplate(),legacyHull:true);
             }
         }
