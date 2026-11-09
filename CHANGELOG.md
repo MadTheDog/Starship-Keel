@@ -12,6 +12,10 @@
 - Added experimental context actions, cargo views, seated pose targets, dismount poses, and solo player-owned grid recovery.
 - Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
 - Added experimental grid physics timing and force application and fixed-facing slider path providers.
+- Added experimental HUD markers, native target selection, and Event Gate output publication for declared functional blocks.
+- Added a candidate grid attachment API. Runtime support stays disabled pending safe native installation.
+- Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
+- Added a separate HoverRail guide sample and geometry checks.
 
 ## 0.1.9
 

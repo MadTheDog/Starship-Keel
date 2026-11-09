@@ -39,6 +39,8 @@ namespace Sevo.Framework.Runtime
         public IReadOnlyList<WeaponAttachmentSlot> GetWeaponAttachmentSlots() =>
             state?.GetAttachmentSlots() ?? Array.Empty<WeaponAttachmentSlot>();
 
+        internal KeelLogicOutputCommand? LogicOutput => state?.CanRun == true ? state.Command as KeelLogicOutputCommand : null;
+
         internal void Invalidate() => state = null;
     }
 
@@ -70,7 +72,7 @@ namespace Sevo.Framework.Runtime
     }
 
     /// <summary>Native command implementation constructed by the game. Register through ContentRegistration.</summary>
-    public sealed class KeelFunctionalCommand : Command, ICommandOnEntityInitializedCallback, IFunctionalCommand
+    public class KeelFunctionalCommand : Command, ICommandOnEntityInitializedCallback, IFunctionalCommand
     {
         internal static bool Enabled { get; set; }
         private FunctionalCommandState FunctionalState { get; }
@@ -212,6 +214,7 @@ namespace Sevo.Framework.Runtime
             context = placement;
             var created = new FunctionalBlockLifetime<FunctionalBlockContext>(placement, definition.Factory, exception =>
             {
+                LogicOutputProvider.Reset(Command);
                 placement.Invalidate();
                 Plugin.ReportFunctionalFailure(definition.Key, exception);
             });
@@ -250,6 +253,7 @@ namespace Sevo.Framework.Runtime
 
         internal void Stop()
         {
+            LogicOutputProvider.Reset(Command);
             var existing = lifetime;
             lifetime = null;
             Binding = null;

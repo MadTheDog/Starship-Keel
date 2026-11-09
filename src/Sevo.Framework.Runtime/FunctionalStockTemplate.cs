@@ -198,7 +198,9 @@ namespace Sevo.Framework.Runtime
 
         internal Brick Create(int id,string displayName,FunctionalBinding binding,CodexTab tab) => kind==ContentKind.AttachmentReceiver
             ? CreateReceiver(id,displayName,binding,tab)
-            : CreateCommand<KeelFunctionalCommand>(id,displayName,binding,tab);
+            : LogicOutputProvider.UsesOutputs(binding.Key)
+                ? CreateCommand<KeelLogicOutputCommand>(id,displayName,binding,tab)
+                : CreateCommand<KeelFunctionalCommand>(id,displayName,binding,tab);
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static bool IsSupportedAttachmentSource(Brick source)

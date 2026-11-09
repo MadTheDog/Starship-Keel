@@ -1,5 +1,7 @@
 # Keel native grid attachments
 
+The current integration reports `gridAttachments` unavailable. The isolated game crashed while installing a native Mag-Lock detour, so Keel skips this installer pending a validated replacement.
+
 Enable `[Experimental] EnableGridAttachments` or `SEVO_KEEL_EXPERIMENTAL_GRID_ATTACHMENTS=1` in a managed disposable solo profile. The independent capability is `gridAttachments`. Call the service from the native-safe game thread with a live stock Mag-Lock placement. A native variant using the same stock command can use the same service.
 
 `TryGetCandidate` reports the live grid under the mount's native acquisition ray. `TryRequestAttach` takes an explicit expected grid and verifies that the native ray still selects it. The stock command retains its mass, target type, existing attachment and recursive attachment rules. `TryRequestRelease` requests the stock unlock. Both requests return true once the native command records the operation. Poll `TryGetAttachedGrid` for the applied state after native synchronization. The service serializes its own pending requests for the same mount or candidate. Stock editing, synchronization, save data, force unlock and release retain their native paths.

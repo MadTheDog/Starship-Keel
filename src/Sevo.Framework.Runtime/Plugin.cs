@@ -99,6 +99,12 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult transferLinks;
                 CapabilityResult gridPhysics;
                 CapabilityResult mechanismPaths;
+                CapabilityResult gridAttachments;
+                CapabilityResult navigationMarkers;
+                CapabilityResult navigationTargets;
+                CapabilityResult logicOutputs;
+                CapabilityResult vehicleControl;
+                CapabilityResult waypointFlight;
                 CapabilityResult bodyEnvironment;
                 CapabilityResult terrainTextureOverrides;
                 CapabilityResult terrainMaterialRegistration;
@@ -153,6 +159,12 @@ namespace Sevo.Framework.Runtime
                     transferLinks = ContractAudit.EvaluateTransferLinks(metadata.MainModule);
                     gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
+                    gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
+                    navigationMarkers = ContractAudit.EvaluateNavigationMarkers(metadata.MainModule);
+                    navigationTargets = ContractAudit.EvaluateNavigationTargets(metadata.MainModule);
+                    logicOutputs = ContractAudit.EvaluateLogicOutputs(metadata.MainModule);
+                    vehicleControl = ContractAudit.EvaluateVehicleControlProvider(metadata.MainModule);
+                    waypointFlight = ContractAudit.EvaluateWaypointFlight(metadata.MainModule);
                     bodyEnvironment = ContractAudit.EvaluateBodyEnvironment(metadata.MainModule);
                     terrainTextureOverrides = ContractAudit.EvaluateTerrainTextureOverrides(metadata.MainModule);
                     terrainMaterialRegistration = ContractAudit.EvaluateTerrainMaterialRegistration(metadata.MainModule);
@@ -378,13 +390,39 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(mechanismPaths,
                         patches => MechanismPathProvider.Install(patches, message => Logger.LogWarning(message)),
                         MechanismPathProvider.Disable));
+                if (gridAttachments.Available)
+                    gridAttachments = new CapabilityResult(gridAttachments.Name, false,
+                        "Native Mag-Lock detours are disabled pending safe runtime installation.");
+                Logger.LogInfo(gridAttachments.Name + ": " + gridAttachments.Reason);
+                navigationMarkers = InstallContentHook(navigationMarkers, "EnableNavigationMarkers", "NAVIGATION_MARKERS",
+                    () => InstallContentHookPatches(navigationMarkers,
+                        patches => NavigationMarkerProvider.Install(patches, message => Logger.LogWarning(message)),
+                        NavigationMarkerProvider.Disable));
+                navigationTargets = InstallContentHook(navigationTargets, "EnableNavigationTargets", "NAVIGATION_TARGETS",
+                    () =>
+                    {
+                        NavigationTargetService.Install();
+                        return navigationTargets;
+                    }, NavigationTargetService.Disable);
+                if (logicOutputs.Available && !KeelFunctionalCommand.Enabled)
+                    logicOutputs = new CapabilityResult(logicOutputs.Name, false, "Requires functional command registration.");
+                logicOutputs = InstallContentHook(logicOutputs, "EnableLogicOutputs", "LOGIC_OUTPUTS",
+                    () =>
+                    {
+                        LogicOutputProvider.Enable();
+                        return logicOutputs;
+                    }, LogicOutputProvider.Disable);
+                vehicleControl = InstallContentHook(vehicleControl, "EnableVehicleControlProvider", "VEHICLE_CONTROL_PROVIDER",
+                    () => InstallContentHookPatches(vehicleControl, VehicleControlProvider.Install, VehicleControlProvider.Disable));
+                waypointFlight = InstallContentHook(waypointFlight, "EnableWaypointFlight", "WAYPOINT_FLIGHT",
+                    () => InstallContentHookPatches(waypointFlight, WaypointFlightService.Install, WaypointFlightService.Disable));
                 gridRecovery = InstallContentHook(gridRecovery, "EnableGridRecovery", "GRID_RECOVERY",
                     () =>
                     {
                         GridRecoveryService.Enable();
                         return gridRecovery;
                     }, GridRecoveryService.Disable);
-                if (!experimental && (mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
+                if (!experimental && (vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
                     || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
@@ -392,7 +430,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths, gridAttachments, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

@@ -28,6 +28,8 @@ The 0.1.10 development branch adds opt-in [body environment](docs/KEEL-BODY-ENVI
 
 The same branch includes [native block variants](docs/KEEL-NATIVE-BLOCK-VARIANTS.md), [context actions and inventory views](docs/KEEL-CONTEXT-INTERACTIONS.md), [seated poses and dismounts](docs/KEEL-SEAT-INTERACTIONS.md), [surface queries and terrain edits](docs/KEEL-WORLD-SURFACES.md), [assemblies and powered machine work rates](docs/KEEL-BLOCK-ASSEMBLIES.md), [grid physics](docs/KEEL-GRID-PHYSICS.md), [slider paths](docs/KEEL-MECHANISM-PATHS.md), [transfer links](docs/KEEL-TRANSFER-LINKS.md), and [player-owned grid recovery](docs/KEEL-GRID-RECOVERY.md). Their individual guides describe current prototype limits.
 
+See the experimental [grid attachment requests](docs/KEEL-GRID-ATTACHMENTS.md), [navigation and vehicle assistance](docs/KEEL-NAVIGATION.md), [logic outputs](docs/KEEL-LOGIC-OUTPUTS.md), and the separate [HoverRail guide sample](samples/Example.HoverRailGuide/README.md).
+
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).
