@@ -27,6 +27,7 @@ namespace Sevo.Framework.Runtime
         private static readonly object Completed = new object();
         private static Action<string>? report;
         private static bool radialBands;
+        private static bool authoredSurfaceBands;
         private static int mainThread;
         private static TerrainPlacementRule[]? declarations;
         private static NativeArray<TerrainMaterialData> materialPublication;
@@ -36,6 +37,7 @@ namespace Sevo.Framework.Runtime
 
         public static bool IsAvailable => report != null;
         public static bool AreRadialBandsAvailable => IsAvailable && radialBands;
+        public static bool AreAuthoredSurfaceBandsAvailable => IsAvailable && authoredSurfaceBands;
 
         public static void Register(string ownerId, string localName, TerrainPlacementScope scope,
             TerrainMaterialReference source, TerrainMaterialReference destination, ulong? seed = null)
@@ -46,6 +48,16 @@ namespace Sevo.Framework.Runtime
             TerrainMaterialReference source, TerrainMaterialReference destination, TerrainRadialBand band, ulong? seed = null)
             => AddRule(new TerrainPlacementRule(ownerId + ":" + localName, TerrainPlacementScope.Planets,
                 source, destination, seed, band));
+
+        /// <summary>Replaces solid samples at an inward depth below a surface supplied by a mod.</summary>
+        /// <param name="surfaceRadius">Pure body-local surface radius in metres, or null outside the authored field.</param>
+        /// <remarks>Use the same immutable field as the terrain generator or survey. This provider runs on the
+        /// game thread for eligible generated samples. Keep it independent of resident chunks, LOD and time.</remarks>
+        public static void RegisterPlanetAuthoredSurfaceDepthBand(string ownerId, string localName,
+            TerrainMaterialReference source, TerrainMaterialReference destination, ulong seed,
+            TerrainAuthoredSurfaceDepthBand band, Func<TerrainAuthoredSurfaceSample, double?> surfaceRadius)
+            => AddRule(new TerrainPlacementRule(ownerId + ":" + localName, TerrainPlacementScope.Planets,
+                source, destination, seed, depth: band, surfaceRadius: surfaceRadius));
 
         private static void AddRule(TerrainPlacementRule rule)
         {
@@ -58,6 +70,7 @@ namespace Sevo.Framework.Runtime
         }
 
         internal static void EnableRadialBands() => radialBands = true;
+        internal static void EnableAuthoredSurfaceBands() => authoredSurfaceBands = true;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static void Install(Harmony harmony, Action<string> warning)
@@ -82,6 +95,7 @@ namespace Sevo.Framework.Runtime
         {
             report = null;
             radialBands = false;
+            authoredSurfaceBands = false;
             Plans.Clear();
             stockNames = null;
             materialPublication = default;
@@ -146,11 +160,15 @@ namespace Sevo.Framework.Runtime
                         var plan = GetPlan(scope, seed);
                         if (plan?.HasChanges == true)
                         {
-                            bool mapRadial = plan.HasRadialBands && CanMapRadial(node, radius);
+                            bool mapSpatial = (plan.HasRadialBands || plan.HasAuthoredSurfaceBands)
+                                && seed.HasValue && CanMapRadial(node, radius);
+                            ulong systemSeed = plan.HasAuthoredSurfaceBands ? GetCurrentSystemSeed() : 0;
                             for (int index = 0; index < values.Length; index++)
                             {
                                 var original = values[index];
-                                var updated = mapRadial ? RemapRadial(original, plan, node, radius, index) : Remap(original, plan);
+                                var updated = mapSpatial
+                                    ? RemapSpatial(original, plan, node, systemSeed, seed.GetValueOrDefault(), radius, index)
+                                    : Remap(original, plan);
                                 if (updated.texId0 != original.texId0 || updated.texId1 != original.texId1)
                                     values[index] = updated;
                             }
@@ -193,10 +211,14 @@ namespace Sevo.Framework.Runtime
             => radius > 0f && float.IsFinite(radius) && node.VoxelSize > 0f && float.IsFinite(node.VoxelSize);
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static VoxelNodeData RemapRadial(VoxelNodeData value, TerrainPlacementPlan plan,
-            in OctreeNodeData node, float radius, int index)
+        private static VoxelNodeData RemapSpatial(VoxelNodeData value, TerrainPlacementPlan plan,
+            in OctreeNodeData node, ulong systemSeed, ulong seed, float radius, int index)
         {
-            if (!plan.NeedsRadialOffset(value.texId0) && !plan.NeedsRadialOffset(value.texId1))
+            bool hasRadial = plan.NeedsRadialOffset(value.texId0) || plan.NeedsRadialOffset(value.texId1);
+            bool solid = value.density < 0;
+            bool hasAuthoredSurface = solid && systemSeed != 0
+                && (plan.NeedsAuthoredSurface(value.texId0) || plan.NeedsAuthoredSurface(value.texId1));
+            if (!hasRadial && !hasAuthoredSurface)
                 return Remap(value, plan);
 
             const int width = OctreeNodeData.DENSITY_WIDTH;
@@ -204,9 +226,22 @@ namespace Sevo.Framework.Runtime
             double x = (double)node.position.x + centre.x;
             double y = (double)node.position.y + centre.y;
             double z = (double)node.position.z + centre.z;
-            double offset = Math.Sqrt(x * x + y * y + z * z) - radius;
-            value.texId0 = plan.Map(value.texId0, offset);
-            value.texId1 = plan.Map(value.texId1, offset);
+            var first = value.texId0;
+            var second = value.texId1;
+            if (hasAuthoredSurface && TerrainAuthoredSurfaceSample.TryCreate(seed, radius, x, y, z, out var sample, systemSeed))
+            {
+                double offset = sample.Radius - radius;
+                value.texId0 = plan.NeedsAuthoredSurface(first)
+                    ? plan.MapAuthoredSurface(first, sample, solid) : plan.Map(first, offset);
+                value.texId1 = first == second ? value.texId0 : plan.NeedsAuthoredSurface(second)
+                    ? plan.MapAuthoredSurface(second, sample, solid) : plan.Map(second, offset);
+            }
+            else
+            {
+                double offset = Math.Sqrt(x * x + y * y + z * z) - radius;
+                value.texId0 = plan.Map(first, offset);
+                value.texId1 = plan.Map(second, offset);
+            }
             return value;
         }
 
@@ -218,7 +253,7 @@ namespace Sevo.Framework.Runtime
                 foreach (var body in PlanetarySystem.SolarBodies)
                 {
                     if (body.planetGenerationId != node.planetGenerationId) continue;
-                    if (radialBands) radius = GetNominalRadius(body);
+                    if (radialBands || authoredSurfaceBands) radius = GetNominalRadius(body);
                     return body.Seed;
                 }
                 return null;
@@ -231,6 +266,9 @@ namespace Sevo.Framework.Runtime
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static float GetNominalRadius(SolarBody body) => body.radius;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static ulong GetCurrentSystemSeed() => PlanetarySystem.CurrentStarData.seed;
 
         private static TerrainPlacementPlan? GetPlan(TerrainPlacementScope scope, ulong? seed)
         {
@@ -256,7 +294,8 @@ namespace Sevo.Framework.Runtime
             var key = (scope, planSeed);
             if (!Plans.TryGetValue(key, out var plan))
             {
-                plan = TerrainPlacementPlan.Build(rules, scope, planSeed, ResolveMaterial, WarnOnce, radialBands);
+                plan = TerrainPlacementPlan.Build(rules, scope, planSeed, ResolveMaterial, WarnOnce, radialBands,
+                    authoredSurfaceBands);
                 Plans.Add(key, plan);
             }
             return plan;

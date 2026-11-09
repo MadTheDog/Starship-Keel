@@ -164,7 +164,8 @@ namespace Sevo.Framework.Runtime
                 && !PlayerState.SystemEntered && !PlayerState.IsControllingVehicle && !PlayerState.ViewLocked
                 && player.CommandActivator != null && !player.CommandActivator.IsInEnterCommand
                 && pendingEntries?.GetValue(player.CommandActivator) is List<BrickCoord> { Count: 0 }
-                && !player.IsSeated && !player.Health.IsRespawning && !player.lookData.isInCamera && !player.lookData.isInTurret
+                && !player.IsSeated && player.Health != null && !player.Health.IsDead && !player.Health.IsRespawning
+                && !player.lookData.isInCamera && !player.lookData.isInTurret
                 && !player.lookData.isInMedbay && !PlayerPhotoMode.IsInPhotoMode && Time.timeScale > 0.5f;
 
         private static bool IsLive(ParentEntity grid)

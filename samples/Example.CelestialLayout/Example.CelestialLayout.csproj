@@ -9,5 +9,6 @@
     <Reference Include="Unity.Collections"><HintPath>..\..\.refs\game\Unity.Collections.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.MathematicsModule"><HintPath>..\..\.refs\game\UnityEngine.MathematicsModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>..\..\.refs\bepinex\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Mirror"><HintPath>..\..\.refs\game\Mirror.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

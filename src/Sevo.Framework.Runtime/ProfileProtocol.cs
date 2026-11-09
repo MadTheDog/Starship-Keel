@@ -165,6 +165,29 @@ namespace Sevo.Framework.Runtime
         public void WriteRegistry(string json)
         { ValidateMarker(); ValidateLineage(json); AtomicWrite("registry.json", Encoding.UTF8.GetBytes(json)); }
 
+        internal GalaxyCatalogProfilePin? ReadGalaxyCatalogPin()
+        {
+            ValidateMarker();
+            var path = Child("galaxy-catalog-pin.json");
+            if (!File.Exists(path)) return null;
+            using var input = File.OpenRead(path);
+            return GalaxyCatalogProfilePin.Read(input, ProfileId);
+        }
+
+        internal void WriteGalaxyCatalogPin(GalaxyCatalogProfilePin pin)
+            => AtomicWrite("galaxy-catalog-pin.json", pin.Serialize(ProfileId));
+
+        internal FileStream AcquireGalaxyCatalogSession()
+        {
+            ValidateMarker();
+            var path = Child("galaxy-catalog-session.lock");
+            try { return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException exception)
+            {
+                throw new InvalidOperationException("The managed galaxy catalog profile is already in use or unavailable.", exception);
+            }
+        }
+
         public void WriteStatus(RuntimeSnapshot snapshot)
         {
             ValidateMarker();

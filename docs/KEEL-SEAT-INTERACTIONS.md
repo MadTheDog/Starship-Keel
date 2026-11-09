@@ -16,4 +16,4 @@ Use the [seat probe](../samples/Example.SeatInteractionProbe/Example.SeatInterac
 3. Exit with a nearby clear candidate. Verify the final position follows the configured point. Place an obstruction along the adjustment and verify the stock exit is used. Repeat after moving the seat's parent.
 4. Check that untagged seats use the normal pose and dismount. Disable one capability and confirm the other remains available.
 
-The metadata tests exercise the native seat, animator and capsule call contracts. Actual poses, exit clearance and moving-grid behavior require a rendered lab test.
+The metadata tests exercise the native seat, animator and capsule call contracts. In a rendered disposable run on Steam build 26451593 / 26w45a, a clear custom exit moved the capsule 0.900 m from the stock exit. An obstructed candidate retained the stock exit, and the unrelated stock seat was unchanged. A separate fixture measured both requested foot targets in the native Animator at full weight, preserved the stock yoke hand targets and verified that foot weights cleared on exit. Pedal mesh fit and moving-grid exit behavior have separate acceptance steps above.

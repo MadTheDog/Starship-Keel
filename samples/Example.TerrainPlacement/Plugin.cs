@@ -27,7 +27,9 @@ namespace Sevo.Example.TerrainPlacement
         private const string Id = "example.terrain-placement";
         private const string Iron = "RAW_IRON_A";
         private const string CustomIron = "example.terrainmaterial:iron";
+        private const ulong StartingPlanetSeed = 90;
         private static readonly TerrainRadialBand ProbeBand = new TerrainRadialBand(-2000, 0);
+        private static readonly TerrainAuthoredSurfaceDepthBand AuthoredProbeBand = new TerrainAuthoredSurfaceDepthBand(0, 2000);
         private string[] sources = { "TEX_ROCK_A", "TEX_ROCK_B", "LARGE_ROCK_A", "LARGE_ROCK_B", "DIRTY_ROCK_A", "DIRTY_ROCK_B" };
         private static TerrainPlacementProbe? instance;
         private Harmony? hook;
@@ -36,6 +38,22 @@ namespace Sevo.Example.TerrainPlacement
         private byte destination;
         private bool useCustom;
         private bool radial;
+        private bool authored;
+        private bool stockCapture;
+        private StockTerrainSurfaceSurvey? survey;
+        private string? surveyPath;
+        private int captureSpacing = 16;
+        private bool canonicalDensityVerified;
+        private readonly Dictionary<(int Level, float Spacing), int> surveyLattices =
+            new Dictionary<(int, float), int>();
+        private int surveyGateRejects;
+        private int surveyInvalidJobs;
+        private int surveyLatticeRejects;
+        private int surveySourceRejects;
+        private int surveyCrossingRejects;
+        private int surveyCoverageRejects;
+        private int surveyMaximumSources;
+        private int surveyMaximumCoverage;
         private bool diagnostics;
         private int diagnosticReports;
         private float nextDiagnosticReport;
@@ -55,8 +73,10 @@ namespace Sevo.Example.TerrainPlacement
         private VoxelNodeData[]? bakedOriginal;
         private OctreeNodeData pendingNode;
         private float pendingRadius;
+        private ulong pendingSystemSeed;
         private int insideBand;
         private int outsideBand;
+        private int differsFromNominal;
         private readonly HashSet<int> remappedLevels = new HashSet<int>();
 
         private void Awake()
@@ -70,17 +90,45 @@ namespace Sevo.Example.TerrainPlacement
         {
             instance = this;
             useCustom = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_CUSTOM") == "1";
-            radial = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL") == "1";
+            string? stockMode = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_STOCK_SURVEY");
+            stockCapture = stockMode == "capture";
+            if (!string.IsNullOrEmpty(stockMode))
+            {
+                if (!stockCapture && stockMode != "replay")
+                    throw new InvalidOperationException("Stock terrain survey mode must be capture or replay.");
+                var profile = OpenLabProfile();
+                surveyPath = Path.Combine(profile.DirectoryPath, StockTerrainSurfaceSurvey.FileName);
+                if (stockCapture)
+                {
+                    var requestedSpacing = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_STOCK_SPACING");
+                    if (requestedSpacing != null && (!int.TryParse(requestedSpacing, out captureSpacing)
+                        || captureSpacing <= 0 || captureSpacing > 2048 || (captureSpacing & (captureSpacing - 1)) != 0))
+                        throw new InvalidOperationException("Stock terrain survey requires a canonical power-of-two spacing from 1 to 2048 metres.");
+                    if (File.Exists(surveyPath)) throw new IOException("The stock terrain survey already exists. Use a new managed state name.");
+                    Logger.LogInfo("TERRAIN STOCK SURFACE SURVEY capture armed at " + captureSpacing + " m spacing.");
+                }
+                else
+                {
+                    survey = StockTerrainSurfaceSurvey.Read(surveyPath);
+                    Logger.LogInfo("TERRAIN STOCK SURFACE SURVEY loaded canonical LOD " + survey.Level
+                        + " with " + survey.Spacing + " m spacing.");
+                }
+            }
+            authored = survey != null || Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_AUTHORED") == "1";
+            radial = stockCapture || authored || Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL") == "1";
             diagnostics = radial && Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_DIAGNOSTICS") == "1";
             var requested = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_SOURCES");
             if (!string.IsNullOrWhiteSpace(requested))
                 sources = requested!.Split(';').Select(name => name.Trim()).Where(name => name.Length > 0)
                     .Distinct(StringComparer.Ordinal).ToArray();
             var target = useCustom ? TerrainMaterialReference.Registered(CustomIron) : TerrainMaterialReference.Stock(Iron);
-            for (int index = 0; index < sources.Length; index++)
+            for (int index = 0; !stockCapture && index < sources.Length; index++)
             {
                 var source = TerrainMaterialReference.Stock(sources[index]);
-                if (radial)
+                if (authored)
+                    Placement.RegisterPlanetAuthoredSurfaceDepthBand(Id, "rock-" + index, source, target,
+                        survey?.BodySeed ?? StartingPlanetSeed, ProbeDepthBand(), survey != null ? survey.Radius : ProbeSurfaceRadius);
+                else if (radial)
                     Placement.RegisterPlanetRadialBand(Id, "rock-" + index, source, target, ProbeBand);
                 else
                     Placement.Register(Id, "rock-" + index, TerrainPlacementScope.All, source, target);
@@ -104,6 +152,13 @@ namespace Sevo.Example.TerrainPlacement
             }
         }
 
+        // An analytic test field independent of stock terrain. A real author supplies the field their own terrain uses.
+        private static double? ProbeSurfaceRadius(TerrainAuthoredSurfaceSample sample)
+            => sample.NominalRadius + 500 * sample.DirectionX;
+
+        private TerrainAuthoredSurfaceDepthBand ProbeDepthBand() => survey == null ? AuthoredProbeBand
+            : new TerrainAuthoredSurfaceDepthBand(0.75 * survey.Spacing, 4 * survey.Spacing);
+
         private void OnDestroy()
         {
             hook?.UnpatchSelf();
@@ -121,6 +176,14 @@ namespace Sevo.Example.TerrainPlacement
                 + $"readbackErrors={Volatile.Read(ref readbackErrors)} planetReadbacks={Volatile.Read(ref planetReadbacks)} "
                 + $"unresolvedReadbacks={Volatile.Read(ref unresolvedReadbacks)} comparedCopies={observedCopies} "
                 + $"inside={insideBand} outside={outsideBand} levels={remappedLevels.Count}");
+            if (stockCapture || survey != null)
+                Logger.LogInfo("TERRAIN STOCK SURFACE SURVEY DIAGNOSTICS "
+                    + $"placement={Placement.IsAvailable} authored={Placement.AreAuthoredSurfaceBandsAvailable} "
+                    + $"nativeGateRejects={surveyGateRejects} invalidJobs={surveyInvalidJobs} latticeRejects={surveyLatticeRejects} "
+                    + $"sourceRejects={surveySourceRejects} crossingRejects={surveyCrossingRejects} coverageRejects={surveyCoverageRejects} "
+                    + $"maxSources={surveyMaximumSources} maxCovered={surveyMaximumCoverage} canonicalReplay={canonicalDensityVerified} "
+                    + "observedLattices=" + string.Join(", ", surveyLattices.OrderBy(pair => pair.Key.Level)
+                        .ThenBy(pair => pair.Key.Spacing).Select(pair => $"L{pair.Key.Level}/{pair.Key.Spacing}m={pair.Value}")));
         }
 
         private static void ObserveDispatch()
@@ -129,7 +192,7 @@ namespace Sevo.Example.TerrainPlacement
             if (self != null) Interlocked.Increment(ref self.dispatches);
         }
 
-        private static void InstallLabSubmission(Harmony harmony)
+        private static Sevo.Framework.Runtime.ProfileSession OpenLabProfile()
         {
             var session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION");
             var state = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
@@ -138,8 +201,13 @@ namespace Sevo.Example.TerrainPlacement
                 || Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_DRAIN_STALLED_FRAME") != "1"
                 || !Guid.TryParseExact(session, "N", out _) || string.IsNullOrEmpty(state) || string.IsNullOrEmpty(game)
                 || !string.Equals(Path.GetFullPath(game), Path.GetFullPath(Paths.GameRootPath), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Terrain buffer submission requires the exact isolated Keel generation lab.");
-            Sevo.Framework.Runtime.ProfileProtocol.Open(state, Paths.GameRootPath, session!);
+                throw new InvalidOperationException("Terrain survey or buffer submission requires the exact isolated Keel generation lab.");
+            return Sevo.Framework.Runtime.ProfileProtocol.Open(state, Paths.GameRootPath, session!);
+        }
+
+        private static void InstallLabSubmission(Harmony harmony)
+        {
+            OpenLabProfile();
             var start = AccessTools.DeclaredMethod(typeof(DensityComputeJob), nameof(DensityComputeJob.CheckForJobStart));
             harmony.Patch(start, postfix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(SubmitLabBuffer)));
         }
@@ -157,7 +225,8 @@ namespace Sevo.Example.TerrainPlacement
             self.submittedDispatches = queued;
         }
 
-        private static void ObserveRaw(AsyncGPUReadbackRequest __0, NativeArray<VoxelNodeData> ___voxelNodeDatas, int ___nodeId)
+        private static void ObserveRaw(AsyncGPUReadbackRequest __0, NativeArray<VoxelNodeData> ___voxelNodeDatas,
+            int ___nodeId, DensityComputeJob.JobNodeData ___jobNodeData)
         {
             var self = instance;
             if (self?.diagnostics == true)
@@ -165,26 +234,55 @@ namespace Sevo.Example.TerrainPlacement
                 Interlocked.Increment(ref self.readbacks);
                 if (__0.hasError) Interlocked.Increment(ref self.readbackErrors);
             }
-            if (self == null || self.tested || !Placement.IsAvailable || __0.hasError
-                || PlayerState.sessionMode != PlayerState.SessionMode.solo || !___voxelNodeDatas.IsCreated) return;
+            if (self == null || self.tested) return;
+            bool stockSurvey = self.stockCapture || self.survey != null;
+            if ((!self.stockCapture && !Placement.IsAvailable) || __0.hasError
+                || PlayerState.sessionMode != PlayerState.SessionMode.solo || !___voxelNodeDatas.IsCreated
+                || (stockSurvey && !GameloopManager.IsMainThread))
+            {
+                if (stockSurvey) Interlocked.Increment(ref self.surveyGateRejects);
+                return;
+            }
             try
             {
                 OctreeNodeData radialNode = default;
                 float radialRadius = 0;
+                ulong systemSeed = 0;
                 if (self.radial)
                 {
-                    if (!Placement.AreRadialBandsAvailable || ___nodeId <= 0) return;
+                    if ((!self.stockCapture && !(self.authored ? Placement.AreAuthoredSurfaceBandsAvailable : Placement.AreRadialBandsAvailable))
+                        || ___nodeId <= 0 || ___nodeId >= OctreeNodeResources.OctreeNodeDatas.Length)
+                    {
+                        if (stockSurvey) self.surveyGateRejects++;
+                        return;
+                    }
                     var node = OctreeNodeResources.OctreeNodeDatas[___nodeId];
-                    if (node.planetGenerationId == 0) return;
+                    if (node.planetGenerationId == 0 || node.isDensityFromSave || !___jobNodeData.IsValid(node))
+                    {
+                        if (stockSurvey) self.surveyInvalidJobs++;
+                        return;
+                    }
                     if (self.diagnostics) Interlocked.Increment(ref self.planetReadbacks);
                     var body = PlanetarySystem.SolarBodies.FirstOrDefault(value => value.planetGenerationId == node.planetGenerationId);
-                    if (body == null || body.radius <= 0)
+                    if (body == null || body.radius <= 0 || ((self.authored || self.stockCapture)
+                        && body.Seed != (self.survey?.BodySeed ?? StartingPlanetSeed)))
                     {
                         if (self.diagnostics) Interlocked.Increment(ref self.unresolvedReadbacks);
                         return;
                     }
                     radialNode = node;
                     radialRadius = body.radius;
+                    systemSeed = PlanetarySystem.CurrentStarData.seed;
+                    if (self.stockCapture)
+                    {
+                        self.CaptureSurvey(node, body, systemSeed, ___voxelNodeDatas);
+                        return;
+                    }
+                    if (self.survey != null)
+                    {
+                        if (systemSeed != self.survey.SystemSeed || radialRadius != self.survey.NominalRadius) return;
+                        self.VerifyCanonicalDensity(node, ___voxelNodeDatas);
+                    }
                 }
                 if (self.sourceIds.Count == 0 && !self.ResolveFixtureIds())
                 {
@@ -204,6 +302,7 @@ namespace Sevo.Example.TerrainPlacement
                     self.original = ___voxelNodeDatas.ToArray();
                     self.pendingNode = radialNode;
                     self.pendingRadius = radialRadius;
+                    self.pendingSystemSeed = systemSeed;
                     return;
                 }
             }
@@ -212,6 +311,79 @@ namespace Sevo.Example.TerrainPlacement
                 self.tested = true;
                 self.Logger.LogError("TERRAIN PLACEMENT PROBE FAIL: raw readback inspection failed. " + exception.Message);
             }
+        }
+
+        private void CaptureSurvey(OctreeNodeData node, SolarBody body, ulong systemSeed, NativeArray<VoxelNodeData> voxels)
+        {
+            var lattice = (node.level, node.VoxelSize);
+            surveyLattices.TryGetValue(lattice, out int observed);
+            surveyLattices[lattice] = observed + 1;
+            if (node.VoxelSize != captureSpacing || voxels.Length != StockTerrainSurfaceSurvey.Count
+                || systemSeed == 0 || node.VoxelSize * StockTerrainSurfaceSurvey.Width > body.radius)
+            {
+                surveyLatticeRejects++;
+                return;
+            }
+            if (sourceIds.Count == 0 && !ResolveFixtureIds())
+            {
+                surveySourceRejects++;
+                return;
+            }
+            double x = node.position.x, y = node.position.y, z = node.position.z;
+            double radius = Math.Sqrt(x * x + y * y + z * z);
+            if (radius <= 0 || !double.IsFinite(radius))
+            {
+                surveyCrossingRejects++;
+                return;
+            }
+            var density = new short[voxels.Length];
+            for (int i = 0; i < density.Length; i++) density[i] = voxels[i].density;
+            var candidate = new StockTerrainSurfaceSurvey(node.level, node.VoxelSize, systemSeed, body.Seed, body.radius,
+                node.position.x, node.position.y, node.position.z, density);
+            double? ground = candidate.Radius(x / radius, y / radius, z / radius);
+            if (!ground.HasValue || Math.Abs(ground.Value - radius) >= 4 * node.VoxelSize)
+            {
+                surveyCrossingRejects++;
+                return;
+            }
+            int covered = 0;
+            int solidSources = 0;
+            for (int i = 0; i < voxels.Length && covered < 32; i++)
+            {
+                var value = voxels[i];
+                if (value.density >= 0 || (!sourceIds.Contains(value.texId0) && !sourceIds.Contains(value.texId1))) continue;
+                solidSources++;
+                var local = SamplePosition(node, i);
+                double sampleRadius = Math.Sqrt(local.X * local.X + local.Y * local.Y + local.Z * local.Z);
+                if (sampleRadius <= 0) continue;
+                double? sampleGround = candidate.Radius(local.X / sampleRadius, local.Y / sampleRadius, local.Z / sampleRadius);
+                double? depth = sampleGround - sampleRadius;
+                if (depth >= 0.75 * candidate.Spacing && depth < 4 * candidate.Spacing) covered++;
+            }
+            surveyMaximumSources = Math.Max(surveyMaximumSources, solidSources);
+            surveyMaximumCoverage = Math.Max(surveyMaximumCoverage, covered);
+            if (covered < 32)
+            {
+                surveyCoverageRejects++;
+                return;
+            }
+            candidate.WriteNew(surveyPath!);
+            tested = true;
+            Logger.LogInfo("TERRAIN STOCK SURFACE SURVEY CAPTURE PASS: LOD " + node.level + ", spacing " + node.VoxelSize
+                + " m, stock outer crossing at radius " + ground.Value + " m. " + surveyPath);
+        }
+
+        private void VerifyCanonicalDensity(OctreeNodeData node, NativeArray<VoxelNodeData> voxels)
+        {
+            if (canonicalDensityVerified || node.level != survey!.Level || node.VoxelSize != survey.Spacing
+                || node.position.x != survey.X || node.position.y != survey.Y || node.position.z != survey.Z) return;
+            if (voxels.Length != StockTerrainSurfaceSurvey.Count)
+                throw new InvalidOperationException("Replayed stock survey density length changed.");
+            for (int i = 0; i < voxels.Length; i++)
+                if (voxels[i].density != survey.DensityAt(i))
+                    throw new InvalidOperationException("Replayed stock survey density no longer matches the capture.");
+            canonicalDensityVerified = true;
+            Logger.LogInfo("TERRAIN STOCK SURFACE SURVEY canonical density matched the captured readback.");
         }
 
         private bool ResolveFixtureIds()
@@ -250,35 +422,46 @@ namespace Sevo.Example.TerrainPlacement
             if (self.radial)
             {
                 self.observedCopies++;
-                self.CheckRadial(before, __1);
+                self.CheckSpatial(before, __1);
                 return;
             }
             self.tested = true;
             self.Check(before, index => __1[index], "TERRAIN PLACEMENT PROBE", "native octree copy");
         }
 
-        private void CheckRadial(VoxelNodeData[] before, NativeArray<VoxelNodeData> after)
+        private void CheckSpatial(VoxelNodeData[] before, NativeArray<VoxelNodeData> after)
         {
-            const int width = OctreeNodeData.DENSITY_WIDTH;
+            string label = survey != null ? "TERRAIN STOCK SURFACE SURVEY REPLAY"
+                : authored ? "TERRAIN AUTHORED SURFACE PLACEMENT PROBE" : "TERRAIN RADIAL PLACEMENT PROBE";
+            var band = ProbeDepthBand();
             for (int index = 0; index < before.Length; index++)
             {
                 var stock = before[index];
                 var current = after[index];
-                var local = pendingNode.GetPosition(index % width, index / width % width, index / (width * width));
-                double x = (double)pendingNode.position.x + local.x;
-                double y = (double)pendingNode.position.y + local.y;
-                double z = (double)pendingNode.position.z + local.z;
-                double offset = Math.Sqrt(x * x + y * y + z * z) - pendingRadius;
-                bool inBand = offset >= ProbeBand.MinimumOffset && offset < ProbeBand.MaximumOffset;
+                var (x, y, z) = SamplePosition(pendingNode, index);
+                double radius = Math.Sqrt(x * x + y * y + z * z);
+                double offset = radius - pendingRadius;
+                bool inNominalBand = offset >= ProbeBand.MinimumOffset && offset < ProbeBand.MaximumOffset;
+                bool solidSource = stock.density < 0 && (sourceIds.Contains(stock.texId0) || sourceIds.Contains(stock.texId1));
+                double? ground = null;
+                if (authored && solidSource && radius > 0)
+                    ground = survey == null ? pendingRadius + 500 * (x / radius)
+                        : pendingSystemSeed == survey.SystemSeed ? survey.Radius(x / radius, y / radius, z / radius) : null;
+                double depth = ground.HasValue ? ground.Value - radius : double.NaN;
+                bool inBand = authored
+                    ? stock.density < 0 && depth >= band.MinimumDepth && depth < band.MaximumDepth
+                    : inNominalBand;
                 byte Expected(byte id) => inBand && sourceIds.Contains(id) ? destination : id;
                 if (current.density != stock.density || current.color != stock.color
                     || current.texId0 != Expected(stock.texId0) || current.texId1 != Expected(stock.texId1))
                 {
                     tested = true;
-                    Logger.LogError("TERRAIN RADIAL PLACEMENT PROBE FAIL: native sample diverged at offset " + offset);
+                    Logger.LogError(label + " FAIL: native sample diverged at nominal offset " + offset
+                        + (authored ? ", authored depth " + depth : ""));
                     return;
                 }
-                if (stock.density >= 0 || (!sourceIds.Contains(stock.texId0) && !sourceIds.Contains(stock.texId1))) continue;
+                if (!solidSource) continue;
+                if (authored && inBand != inNominalBand) differsFromNominal++;
                 if (inBand)
                 {
                     insideBand++;
@@ -287,11 +470,21 @@ namespace Sevo.Example.TerrainPlacement
                 else
                     outsideBand++;
             }
-            if (remappedLevels.Count < 2 || outsideBand == 0) return;
+            if (remappedLevels.Count < 2 || outsideBand == 0 || (authored && differsFromNominal == 0)
+                || (survey != null && !canonicalDensityVerified)) return;
             tested = true;
-            Logger.LogInfo("TERRAIN RADIAL PLACEMENT PROBE PASS: " + insideBand + " solid samples in band; "
+            Logger.LogInfo(label + " PASS: " + insideBand + " solid samples in band; "
                 + outsideBand + " outside; remapped LODs " + string.Join(", ", remappedLevels.OrderBy(level => level))
+                + (authored ? "; " + differsFromNominal + " classifications differed from nominal" : "")
                 + "; density and packed color matched.");
+        }
+
+        private static (double X, double Y, double Z) SamplePosition(OctreeNodeData node, int index)
+        {
+            const int width = OctreeNodeData.DENSITY_WIDTH;
+            var offset = node.GetPosition(index % width, index / width % width, index / (width * width));
+            return ((double)node.position.x + offset.x, (double)node.position.y + offset.y,
+                (double)node.position.z + offset.z);
         }
 
         private static IEnumerable<CodeInstruction> ObserveSynchronousReadback(IEnumerable<CodeInstruction> instructions)

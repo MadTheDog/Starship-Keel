@@ -86,6 +86,8 @@ namespace Sevo.Framework.Runtime
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static GalaxyCatalogPlan SelectStockSubsetCore(Func<GalaxyStarSeed, bool> select)
         {
+            if (GalaxyCatalogProvider.IsPublished)
+                throw new InvalidOperationException("Restart before selecting a subset of the stock galaxy.");
             var distribution = AssetRepoGalaxy.Distribution;
             var routes = AssetRepoGalaxy.WarpGateRoutes;
             int sectorCount = GalaxyCatalogPlan.SectorWidth * GalaxyCatalogPlan.SectorWidth;
@@ -128,17 +130,21 @@ namespace Sevo.Framework.Runtime
                 throw new InvalidOperationException("The native introduction system is absent or moved.");
 
             var rows = new GalaxyCommon.ShaderStarData[plan.Stars.Count];
-            var stars = new Dictionary<ulong, StarData>();
+            var nativeStars = new List<StarData>(plan.Stars.Count);
+            var endpoints = new HashSet<ulong>(plan.Routes.SelectMany(route => new[] { route.StartSeed, route.EndSeed }));
+            var stars = new Dictionary<ulong, StarData>(endpoints.Count);
             var cells = new HashSet<(int X, int Z)>();
             var economy = new int[7];
             for (int index = 0; index < plan.Stars.Count; index++)
             {
                 var seed = plan.Stars[index];
-                var star = new StarData(seed.Seed, new Vector3i(seed.SectorX, seed.SectorY, seed.SectorZ));
+                var star = seed.Equals(start) ? GameIntroductionResources.STARTING_SYSTEM
+                    : new StarData(seed.Seed, new Vector3i(seed.SectorX, seed.SectorY, seed.SectorZ));
                 var cell = star.Coordinate;
                 if (!cells.Add((cell.x, cell.z)))
                     throw new InvalidOperationException($"Star {seed.Seed} overlaps another star at native map cell {cell.x}/{cell.z}.");
-                stars.Add(seed.Seed, star);
+                nativeStars.Add(star);
+                if (endpoints.Contains(seed.Seed)) stars.Add(seed.Seed, star);
                 star.SetEconomyScores(economy);
                 rows[index] = new GalaxyCommon.ShaderStarData
                 {
@@ -161,7 +167,7 @@ namespace Sevo.Framework.Runtime
                 endPosition = stars[route.EndSeed].HolomapPosition,
                 isDiscovered = 1,
             }).ToArray();
-            return new GalaxyCatalogCompiledPreview(plan, rows, gateRows);
+            return new GalaxyCatalogCompiledPreview(plan, nativeStars, rows, gateRows);
         }
 
         private static void RequireAvailability()
@@ -180,11 +186,15 @@ namespace Sevo.Framework.Runtime
         public GalaxyCatalogPlan Plan { get; }
         public IReadOnlyList<GalaxyCommon.ShaderStarData> StarRows { get; }
         public IReadOnlyList<GalaxyCommon.ShaderWarpGateRouteData> GateRows { get; }
+        internal List<StarData> NativeStars { get; }
+        internal GalaxyCommon.ShaderStarData[] NativeStarRows { get; }
 
-        internal GalaxyCatalogCompiledPreview(GalaxyCatalogPlan plan, GalaxyCommon.ShaderStarData[] stars,
+        internal GalaxyCatalogCompiledPreview(GalaxyCatalogPlan plan, List<StarData> nativeStars, GalaxyCommon.ShaderStarData[] stars,
             GalaxyCommon.ShaderWarpGateRouteData[] gates)
         {
             Plan = plan;
+            NativeStars = nativeStars;
+            NativeStarRows = stars;
             StarRows = Array.AsReadOnly(stars);
             GateRows = Array.AsReadOnly(gates);
         }

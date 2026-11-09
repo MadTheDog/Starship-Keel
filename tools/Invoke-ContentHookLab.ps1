@@ -2,6 +2,7 @@ param(
     [ValidateSet('Baseline','Audit','Hooks')][string]$Mode = 'Audit',
     [ValidateRange(10,300)][int]$TimeoutSeconds = 75,
     [string[]]$ExpectedLog = @(),
+    [string[]]$UnexpectedLog = @(),
     [switch]$Rendered,
     [switch]$FluidProbe,
     [switch]$CraftProbe,
@@ -66,13 +67,29 @@ try {
     $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         if (Test-Path -LiteralPath $statusPath) {
-            $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+            try {
+                $file = [IO.File]::Open($statusPath, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                    [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+                try {
+                    $reader = [IO.StreamReader]::new($file)
+                    try { $status = $reader.ReadToEnd() | ConvertFrom-Json }
+                    finally { $reader.Dispose() }
+                }
+                finally { $file.Dispose() }
+            }
+            catch [IO.IOException] {
+                Start-Sleep -Milliseconds 100
+                continue
+            }
             if ($status.session -eq $session -and $status.processId -eq $process.Id -and ($status.resourcesReady -or $status.failed)) {
                 $status | ConvertTo-Json -Depth 8
                 if ($status.failed) { throw $status.reason }
                 while (($ExpectedLog.Count -gt 0 -or $ExpectedPlayerLog.Count -gt 0) -and !$process.HasExited -and [datetime]::UtcNow -lt $deadline) {
                     if (Test-Path -LiteralPath $loaderLog) {
                         $log = Get-Content -LiteralPath $loaderLog -Raw
+                        foreach ($pattern in $UnexpectedLog) {
+                            if ($log.Contains($pattern)) { throw "Unexpected probe log '$pattern'. See $state." }
+                        }
                         if ($FluidProbe -and $log -match "KEEL_FLUID_PROBE FAIL[^\r\n]*session=$session") {
                             throw $Matches[0]
                         }

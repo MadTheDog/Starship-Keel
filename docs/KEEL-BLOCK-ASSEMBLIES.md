@@ -28,3 +28,5 @@ The modifier applies to future powered ticks of Keel custom recipes. It preserve
 4. Compare one custom Arc Furnace batch with and without the sample 2× module. Confirm both batches consume the declared input and produce one output stack. Stall power during a batch and confirm progress pauses. Remove the module mid-batch, then confirm the remaining work progresses at the stock rate.
 
 Offline metadata checks exercise the bounded brick lookup and native blueprint charging and dispatch contracts. They do not exercise live placement or transaction behavior.
+
+The rendered machine sample compared two powered Arc Furnace batches on Steam build 26451593 / 26w45a. The module advanced the sample recipe at twice the stock rate. Removing it restored the stock rate while preserving progress already earned. Both machines produced exactly three dust. A separate rendered Creative run called the native shipyard eligibility method. A complete assembly retained stock eligibility, and missing or removed parts blocked it. Actual blueprint construction and Survival resource accounting have separate acceptance steps above.

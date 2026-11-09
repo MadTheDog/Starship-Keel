@@ -1,0 +1,11 @@
+# Celestial layout probe
+
+This sample uses the Keel 0.1.10 candidate on Steam build 26451593 / 26w45a. It runs only in the dedicated SEVO Keel Gen Lab 0110 game identity. Enable `SEVO_KEEL_EXPERIMENTAL_CELESTIAL_LAYOUT=1` and `SEVO_KEEL_CELESTIAL_LAYOUT_PROBE=1`.
+
+The probe chooses a non-introduction system with at least two free native body slots. It appends one rocky moon to a stock planet and one rocky planet to the primary star. `KEEL_CELESTIAL_LAYOUT_PROBE PASS` confirms that the stock slots stay stable, both declarations resolve in the expected order, mission lookups agree with the stock generator, and the native deep-space points refer to their actual orbit bodies.
+
+Travelling to the reported system through normal gameplay enables an additional read-only check. `KEEL_CELESTIAL_DESTINATION_PROBE PASS` confirms that the stock destination loader instantiated both bodies and published matching native point-of-interest data.
+
+For automated acceptance, set `SEVO_KEEL_CELESTIAL_LAYOUT_TRAVEL=1` only when booting the lab's new `ConnectorProbe-<session prefix>` Creative character. The fixture defers that character's initial Creative tutorial and observes the stock medbay command's entry and exit and the first stock respawn completion. If the character is still attached to the grid observed at exit or a verified docked parent of the medbay, the fixture moves them beyond its bounds and waits for the native parent to clear. It then enters the destination through the game's native system transition, moves the test character to a clear orbit, and requests a stock save. `KEEL_CELESTIAL_SAVE_PROBE PASS` confirms that the native save records the destination.
+
+On a fresh process, keep the same sample and layout enabled, omit `SEVO_KEEL_CELESTIAL_LAYOUT_TRAVEL`, and set `SEVO_KEEL_CELESTIAL_LAYOUT_RELOAD_CHARACTER` to the exact saved character name. The fixture verifies the native file and chooses only that character through the stock picker. `KEEL_CELESTIAL_RELOAD_PROBE PASS` confirms that the destination was reconstructed with the same declared body slots and that the native points still resolve against them. Compare the `layout=` hashes from the save and reload records to verify that the complete body catalog retained its IDs, parent links, sizes and positions.

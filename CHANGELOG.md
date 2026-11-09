@@ -4,10 +4,11 @@
 
 - Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.
 - Added experimental terrain texture overrides that preserve stock material IDs and atlas layers.
-- Added an experimental celestial layout provider for targeted radius and orbit overrides and append-only rocky moons.
+- Added an experimental celestial layout provider for targeted radius and orbit overrides and append-only rocky planets and moons. Native mission and point-of-interest lookups resolve the same body IDs.
 - Added experimental terrain material registration with optional custom layers, deterministic material remaps, and material-to-item mining drop bindings.
 - Added a bounded custom ore discovery feed for accepted stock scanner pulses.
 - Added a read-only galaxy catalog planner and native-format preview for mod-supplied candidates.
+- Added opt-in galaxy publication for a dedicated solo save root, with native map and gate data and a persistent catalog identity check before stock character entry.
 - Added experimental native storage connectors, temporary hose links, and audited Mag-Lock and seat variants.
 - Added experimental context actions, cargo views, seated pose targets, dismount poses, and solo player-owned grid recovery.
 - Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
@@ -18,11 +19,31 @@
 - Added an opt-in read-only observer for authoritative gameplay grid destruction.
 - Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
 - Added an opt-in sublight input lease for the local player's last piloted ship after stock exit completes.
+- Added an opt-in local camera-follow lease for a loaded grid, with stock action suppression until the ordinary view returns.
 - Detect native definitions occupying inactive managed brick IDs during admission and resource checks.
 - Added a separate HoverRail guide sample and geometry checks.
 - Added opt-in planet and moon material bands relative to the native nominal body radius.
 - Added read-only galaxy catalog checks for installed asset references, loaded aliases, and selected save identity.
 - Added an opt-in Creative solo prototype for flush placement of registered item fittings against stock cargo faces.
+- Added depth bands against a deterministic, mod-supplied surface for fresh solid planet and moon samples.
+- Verified a bounded stock terrain survey reproduced its canonical density after restart and applied depth bands across two terrain detail levels.
+- Verified native terrain atlas replacement at GPU mips 0 and 4. The separate starter-planet color bake retained identical coarse face textures.
+- Verified that a flush cargo fitting and its bidirectional routes survived stock character reload, then transferred items after reopening.
+- Verified live Arc Furnace module changes against stock progress. The opt-in module doubled the rate, removal restored the stock rate, and both batches completed with the expected output.
+- Verified a clear custom seat exit, stock fallback for an obstructed exit, and unchanged exit behavior on an unrelated seat.
+- Verified seated foot targets reach the native Animator alongside stock yoke hand targets and clear on exit.
+- Verified native cargo opening through a fresh context action and rejection of a stale action. Verified a cornering slider stops at an obstacle and resumes after its removal.
+- Verified native shipyard eligibility follows assembly presence, and a short stock waypoint approach releases at the requested boundary.
+- Verified public terrain and nominal ocean queries against native ray results, including explicit water inclusion and exclusion.
+- Verified native HUD marker movement and cleanup and selection of a separate tracked contact.
+- Verified simultaneous camera follow and sublight input, then stock pilot re-entry, exit and exact grid cleanup.
+- Verified native destination loading and fresh-process character reload reproduce the same appended planet and moon layout.
+
+### Current limits
+
+- Galaxy publication is solo-only and requires a dedicated marked save root. Physical gate travel needs separate acceptance.
+- Surface depth uses a supplied or surveyed field. Keel does not infer a global stock height field from streamed terrain.
+- Camera follow and sublight control support a loaded ship within the documented local-player bounds. Full remote possession and NPC or generated wreck ownership transfer still require verified native transitions.
 
 ## 0.1.9
 

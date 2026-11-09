@@ -153,6 +153,41 @@ namespace Sevo.Framework.Runtime
             }
         }
 
+        public static CapabilityResult EvaluateTerrainAuthoredSurfacePlacement(ModuleDefinition module)
+        {
+            const string capability = "terrainAuthoredSurfacePlacement";
+            try
+            {
+                var positions = EvaluateTerrainRadialPlacement(module);
+                if (!positions.Available) throw new InvalidOperationException(positions.Reason);
+                if (!Field(module, "World.PlanetarySystem", "CurrentStarData", "World.StarData", true)
+                    || !Field(module, "World.StarData", "seed", "System.UInt64", false))
+                    throw new InvalidOperationException("Planet terrain system identity changed.");
+                var density = RequireTerrainProviderMethod(module, PlacementVoxel, "get_Density", false, "System.Single");
+                var decode = density.Body.Instructions.Where(instruction => instruction.OpCode.Code != Code.Nop).ToArray();
+                if (!density.IsPublic || decode.Length != 6 || decode[0].OpCode.Code != Code.Ldarg_0
+                    || !TerrainProviderField(decode[1], Code.Ldfld, PlacementVoxel, "density")
+                    || decode[2].OpCode.Code != Code.Conv_R4 || decode[3].OpCode.Code != Code.Ldc_R4
+                    || decode[3].Operand is not float scale || !float.IsFinite(scale) || scale <= 0
+                    || decode[4].OpCode.Code is not (Code.Div or Code.Mul) || decode[5].OpCode.Code != Code.Ret)
+                    throw new InvalidOperationException("Native terrain density no longer preserves the packed sign.");
+
+                var mining = RequireTerrainProviderMethod(module, PlacementNodes, "UpdateDensitiesOnNode", true,
+                    TerrainVoid, "System.Int32", "Unity.Mathematics.float3", "Manager.ImpactData", "Vector3l");
+                if (!mining.Body.Instructions.Any(instruction =>
+                    TerrainPlacementCall(instruction, PlacementVoxel, density.Name)
+                    && instruction.Next is { OpCode.Code: Code.Ldc_R4, Operand: 0f }
+                    && instruction.Next.Next?.OpCode.Code == Code.Clt))
+                    throw new InvalidOperationException("Stock mining no longer identifies solid samples by negative density.");
+
+                return new CapabilityResult(capability, true, "Body-local voxel coordinates and stock solid density polarity validated.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
         private static bool TerrainPlacementAxis(Instruction[] code, int start, Code argument)
             => code[start].OpCode.Code == argument
                 && (code[start + 1].OpCode.Code is Code.Ldc_I4 or Code.Ldc_I4_S) && Constant(code[start + 1]) == 10

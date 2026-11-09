@@ -4,15 +4,15 @@ using System.Linq;
 
 namespace Sevo.Framework.Sdk
 {
-    /// <summary>A deterministic body override or append-only rocky moon declaration. Distances are in metres.</summary>
+    /// <summary>A deterministic body override or append-only rocky planet or moon declaration. Distances are in metres.</summary>
     public sealed class CelestialLayoutRule
     {
         private CelestialLayoutRule(ulong systemSeed, ulong bodySeed, ulong? parentSeed,
-            float? radiusMeters, float? orbitRadiusMeters)
+            float? radiusMeters, float? orbitRadiusMeters, bool rockyPlanet = false)
         {
             if (systemSeed == 0) throw new ArgumentOutOfRangeException(nameof(systemSeed));
             if (bodySeed == 0 || bodySeed == systemSeed) throw new ArgumentOutOfRangeException(nameof(bodySeed));
-            if (parentSeed == 0 || parentSeed == bodySeed || parentSeed == systemSeed)
+            if (parentSeed == 0 || parentSeed == bodySeed || (parentSeed == systemSeed && !rockyPlanet))
                 throw new ArgumentOutOfRangeException(nameof(parentSeed));
             ValidateDistance(radiusMeters, nameof(radiusMeters));
             ValidateDistance(orbitRadiusMeters, nameof(orbitRadiusMeters));
@@ -32,6 +32,7 @@ namespace Sevo.Framework.Sdk
         public float? RadiusMeters { get; }
         public float? OrbitRadiusMeters { get; }
         public bool IsAddition => ParentSeed.HasValue;
+        internal bool IsPlanetAddition => ParentSeed == SystemSeed;
 
         public static CelestialLayoutRule OverrideBody(ulong systemSeed, ulong bodySeed,
             float? radiusMeters = null, float? orbitRadiusMeters = null)
@@ -40,6 +41,11 @@ namespace Sevo.Framework.Sdk
         public static CelestialLayoutRule AddRockyMoon(ulong systemSeed, ulong parentSeed, ulong moonSeed,
             float radiusMeters, float orbitRadiusMeters)
             => new CelestialLayoutRule(systemSeed, moonSeed, parentSeed, radiusMeters, orbitRadiusMeters);
+
+        /// <summary>Appends a seeded rocky planet in orbit around the primary star without replacing stock body IDs.</summary>
+        public static CelestialLayoutRule AddRockyPlanet(ulong systemSeed, ulong planetSeed,
+            float radiusMeters, float orbitRadiusMeters)
+            => new CelestialLayoutRule(systemSeed, planetSeed, systemSeed, radiusMeters, orbitRadiusMeters, rockyPlanet: true);
 
         private static void ValidateDistance(float? value, string name)
         {

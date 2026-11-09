@@ -42,9 +42,12 @@ namespace Sevo.Framework.Runtime
         }
 
         internal bool Matches(string root, string key, int requestedRevision, string digest)
-            => string.Equals(nativeSaveRoot, ProfileProtocol.Canonical(root), StringComparison.OrdinalIgnoreCase)
+            => UsesSaveRoot(root)
             && string.Equals(providerKey, key, StringComparison.Ordinal)
             && revision == requestedRevision && string.Equals(fingerprint, digest, StringComparison.Ordinal);
+
+        internal bool UsesSaveRoot(string root)
+            => string.Equals(nativeSaveRoot, ProfileProtocol.Canonical(root), StringComparison.OrdinalIgnoreCase);
 
         internal bool BelongsTo(Guid expectedProfile) => profileId == expectedProfile;
 
@@ -126,6 +129,12 @@ namespace Sevo.Framework.Runtime
         [DataMember(Name = "profileId", IsRequired = true)] private Guid ProfileId { get; set; }
         [DataMember(Name = "stateDirectory", IsRequired = true)] private string StateDirectory { get; set; } = "";
         [DataMember(Name = "nativeSaveRoot", IsRequired = true)] private string NativeSaveRoot { get; set; } = "";
+
+        internal static bool HasMarker(string root)
+        {
+            var path = Path.Combine(root, FileName);
+            return File.Exists(path) || Directory.Exists(path);
+        }
 
         internal static string Verify(ProfileSession profile, string nativeSaveRoot, bool requireEmpty)
         {

@@ -20,4 +20,4 @@ Enable `[Experimental] EnableContextActions` and `EnableInventoryViews` in an is
 3. Aim at a reachable switch or other manually activable command and press F9. Verify that the probe records the targeted brick ID and that normal stock activation still works.
 4. Disable inventory views only. Verify that the F9 interaction still works and that the F8 action is unavailable.
 
-The standalone metadata test verifies native call relationships and identity-independent admission. In-game input and inventory behavior require a rendered lab test.
+The standalone metadata test verifies native call relationships and identity-independent admission. A rendered disposable run on Steam build 26451593 / 26w45a rejected a prior-frame action, then used a fresh action to open and close the exact targeted native cargo inventory.

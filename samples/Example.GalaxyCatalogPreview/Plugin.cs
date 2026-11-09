@@ -17,7 +17,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
 {
     [BepInPlugin("example.galaxycatalogpreview", "Example Galaxy Catalog Preview", "0.1.0")]
     [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
-    public sealed class Plugin : BaseUnityPlugin
+    public sealed partial class Plugin : BaseUnityPlugin
     {
         private const string DiagnosticOwner = "example.galaxycatalogpreview.lifecycle";
         private static Plugin? active;
@@ -25,6 +25,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
 
         private void Awake()
         {
+            SetUpPublicationProbe();
             if (Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_BINDING_PROBE") != "1") return;
             active = this;
             var harmony = new Harmony(DiagnosticOwner);
@@ -40,6 +41,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
 
         private void OnDestroy()
         {
+            StopPublicationHarness();
             PlanetarySystem.OnNewSystem -= ObserveLoadedBindings;
             if (active != this) return;
             new Harmony(DiagnosticOwner).UnpatchSelf();
@@ -60,6 +62,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
 
         private void Update()
         {
+            UpdatePublicationProbe();
             if (checkedCatalog || Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_PREVIEW_PROBE") != "1"
                 || AssetRepoGalaxy.Distribution == null || AssetRepoGalaxy.Distribution.StarDatas?.Count is not > 0)
                 return;

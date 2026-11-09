@@ -39,6 +39,29 @@ internal static class GalaxyCatalogPreEntryTests
         field.FieldType = module.TypeSystem.Int32;
         Check(!ContractAudit.EvaluateGalaxyCatalogPreEntry(module).Available, "A changed serialized field type must reject.");
         field.FieldType = type;
+        var publication = ContractAudit.EvaluateGalaxyCatalogPublication(module);
+        Check(publication.Available, publication.Reason);
+        var exceptionRegion = new ExceptionHandler(ExceptionHandlerType.Finally);
+        play.Body.ExceptionHandlers.Add(exceptionRegion);
+        Check(!ContractAudit.EvaluateGalaxyCatalogPublication(module).Available,
+            "An exception region at character entry must prevent injection of the publication gate.");
+        play.Body.ExceptionHandlers.Remove(exceptionRegion);
+        var mapData = module.GetType("World.GalaxyWarpGateRoutes");
+        var reverse = mapData.Fields.Single(value => value.Name == "EndToStart");
+        var reverseType = reverse.FieldType;
+        reverse.FieldType = module.TypeSystem.Int32;
+        Check(!ContractAudit.EvaluateGalaxyCatalogPublication(module).Available,
+            "A changed reverse route binding must reject publication.");
+        reverse.FieldType = reverseType;
+        var faction = module.GetType("Game.FactionTerritoryMap");
+        var spawn = faction.Methods.Single(method => method.Name == "SpawnFortress");
+        var populate = spawn.Body.Instructions.Single(instruction =>
+            instruction.Operand is MethodReference method && method.Name == "PopulateFortressToSpawn");
+        var spawnCall = populate.OpCode;
+        populate.OpCode = OpCodes.Nop;
+        Check(!ContractAudit.EvaluateGalaxyCatalogPublication(module).Available,
+            "A changed fortress allocation boundary must reject sparse catalog publication.");
+        populate.OpCode = spawnCall;
 
         string? installedAssets = Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_CONTRACT_TEST_ASSETS");
         if (!string.IsNullOrEmpty(installedAssets))
@@ -62,6 +85,8 @@ internal static class GalaxyCatalogPreEntryTests
         string world = Path.Combine(saves, "Existing");
         string profileFile = Path.Combine(state, "sevo-runtime-profile.json");
         string bindingFile = Path.Combine(saves, GalaxyCatalogNativeSaveBinding.FileName);
+        string pinFile = Path.Combine(state, "galaxy-catalog-pin.json");
+        string lockFile = Path.Combine(state, "galaxy-catalog-session.lock");
         string worldFile = Path.Combine(world, "Existing.mpc");
         var profileId = Guid.NewGuid();
         const string provider = "example.catalog:layout";
@@ -74,8 +99,23 @@ internal static class GalaxyCatalogPreEntryTests
             File.WriteAllText(bindingFile, JsonSerializer.Serialize(new
                 { schemaVersion = 1, profileId, stateDirectory = state, nativeSaveRoot = saves }));
             var profile = ProfileProtocol.Open(state, gamePath, "galaxy-pre-entry-test");
+            Check(profile.ReadGalaxyCatalogPin() == null, "An ordinary profile has no custom catalog pin.");
+            using (profile.AcquireGalaxyCatalogSession())
+            {
+                var other = ProfileProtocol.Open(state, gamePath, "another-galaxy-session");
+                Reject(() => other.AcquireGalaxyCatalogSession().Dispose(),
+                    "Two processes must not admit the same custom catalog root concurrently.");
+            }
+            using var released = profile.AcquireGalaxyCatalogSession();
             var prepared = GalaxyCatalogPreEntry.VerifySelection(profile, saves, null, provider, 1, digest, "Existing", 10, creating: true);
             Check(prepared.ContainsWorld("Existing", 10) && !Directory.Exists(world), "New-world preflight must not create a native save.");
+            profile.WriteGalaxyCatalogPin(prepared);
+            var relaunched = ProfileProtocol.Open(state, gamePath, "galaxy-next-process");
+            var persisted = relaunched.ReadGalaxyCatalogPin();
+            Check(persisted != null && persisted.Matches(saves, provider, 1, digest) && persisted.ContainsWorld("Existing", 10),
+                "A fresh profile session must read the exact catalog and world identity.");
+            Reject(() => relaunched.WriteGalaxyCatalogPin(new GalaxyCatalogProfilePin(Guid.NewGuid(), saves, provider, 1, digest)),
+                "Writing a foreign galaxy pin must reject.");
             Directory.CreateDirectory(world);
             File.WriteAllBytes(worldFile, new byte[] { 9, 1, 2, 3 });
             Reject(() => GalaxyCatalogPreEntry.VerifySelection(profile, saves, null, provider, 1, digest, "Existing", 10, false, worldFile),
@@ -101,6 +141,8 @@ internal static class GalaxyCatalogPreEntryTests
             File.Delete(worldFile);
             if (Directory.Exists(world)) Directory.Delete(world);
             File.Delete(bindingFile);
+            File.Delete(pinFile);
+            File.Delete(lockFile);
             File.Delete(profileFile);
             Directory.Delete(gamePath);
             Directory.Delete(saves);

@@ -79,6 +79,65 @@ internal static class TerrainPlacementTests
         var broad = TerrainPlacementPlan.Build(strata.Append(rules[0]).ToArray(), TerrainPlacementScope.Planets, 45, Resolve, _ => {});
         Check(!broad.HasRadialBands && broad.Map(2, -200) == 2, "An unconditional rule must conflict with a radial rule for the same source.");
 
+        // The two directions have different ground radii even though the samples share a nominal elevation.
+        double? Surface(TerrainAuthoredSurfaceSample sample)
+            => sample.DirectionX > 0 ? sample.NominalRadius + 10 : sample.NominalRadius;
+        var depthRule = new TerrainPlacementRule("alpha.mod:surface", TerrainPlacementScope.Planets, stone, iron, 45,
+            depth: new TerrainAuthoredSurfaceDepthBand(10, 20), surfaceRadius: Surface);
+        var depth = TerrainPlacementPlan.Build(new[] { depthRule, rules[1] }, TerrainPlacementScope.Planets, 45, Resolve, _ => {});
+        Check(depth.HasAuthoredSurfaceBands && depth.Map(2, 0) == 2,
+            "A surface band was evaluated using nominal elevation without a local surface.");
+        Check(TerrainAuthoredSurfaceSample.TryCreate(45, 100, 100, 0, 0, out var uphill)
+            && TerrainAuthoredSurfaceSample.TryCreate(45, 100, -100, 0, 0, out var downhill)
+            && depth.MapAuthoredSurface(2, uphill, true) == 7 && depth.MapAuthoredSurface(2, downhill, true) == 2,
+            "Equal nominal elevations must classify using the distinct local surface radii.");
+        Check(TerrainAuthoredSurfaceSample.TryCreate(45, 100, 90, 0, 0, out var belowBand)
+            && depth.MapAuthoredSurface(2, belowBand, true) == 2,
+            "The deep edge of an authored surface band must be exclusive.");
+        Check(TerrainAuthoredSurfaceSample.TryCreate(45, 100, 100, 0, 0, out var point)
+            && depth.MapAuthoredSurface(2, point, false) == 2 && depth.MapAuthoredSurface(7, point, true) == 8
+            && !TerrainAuthoredSurfaceSample.TryCreate(45, 100, 0, 0, 0, out _),
+            "Air, invalid directions and unrelated material rules must preserve their established behavior.");
+        double Coordinate(double nodeCentre, int index, double spacing) => nodeCentre + (index - 9.5) * spacing;
+        Check(TerrainAuthoredSurfaceSample.TryCreate(45, 100, Coordinate(88, 17, 1), 0.5, 0.5, out var left)
+            && TerrainAuthoredSurfaceSample.TryCreate(45, 100, Coordinate(104, 1, 1), 0.5, 0.5, out var right)
+            && TerrainAuthoredSurfaceSample.TryCreate(45, 100, Coordinate(96, 9, 2), 1, 1, out var coarse)
+            && left.DirectionX == right.DirectionX && depth.MapAuthoredSurface(2, left, true) == 7
+            && depth.MapAuthoredSurface(2, right, true) == 7 && depth.MapAuthoredSurface(2, coarse, true) == 7,
+            "The shared edge and nearby coarse sample must classify from the same body-local surface field.");
+        var incompatible = TerrainPlacementPlan.Build(new[] { depthRule, strata[0], rules[1] },
+            TerrainPlacementScope.Planets, 45, Resolve, _ => {});
+        Check(!incompatible.HasAuthoredSurfaceBands && !incompatible.HasRadialBands && incompatible.Map(7) == 8,
+            "Incomparable reference frames must retain stock only for the contested material.");
+        var upper = new TerrainPlacementRule("beta.mod:upper", TerrainPlacementScope.Planets, stone, other, 45,
+            depth: new TerrainAuthoredSurfaceDepthBand(0, 10), surfaceRadius: Surface);
+        var sameField = TerrainPlacementPlan.Build(new[] { upper, depthRule }, TerrainPlacementScope.Planets, 45, Resolve, _ => {});
+        Check(sameField.HasAuthoredSurfaceBands && sameField.MapAuthoredSurface(2, point, true) == 7,
+            "Disjoint bands must compose when they measure from one shared surface.");
+        var competing = new TerrainPlacementRule("beta.mod:unrelated", TerrainPlacementScope.Planets, stone, other, 45,
+            depth: new TerrainAuthoredSurfaceDepthBand(0, 10), surfaceRadius: sample => sample.NominalRadius + 30);
+        var distinctFields = TerrainPlacementPlan.Build(new[] { competing, depthRule }, TerrainPlacementScope.Planets, 45,
+            Resolve, _ => {});
+        Check(!distinctFields.HasAuthoredSurfaceBands && distinctFields.MapAuthoredSurface(2, point, true) == 2,
+            "Bands that use different ground surfaces cannot safely compose on the same material.");
+        var declined = new TerrainPlacementRule("alpha.mod:declined", TerrainPlacementScope.Planets, stone, iron, 45,
+            depth: new TerrainAuthoredSurfaceDepthBand(0, 20), surfaceRadius: _ => double.NaN);
+        var invalidSurface = TerrainPlacementPlan.Build(new[] { declined, rules[1] }, TerrainPlacementScope.Planets, 45, Resolve, _ => {});
+        Check(invalidSurface.MapAuthoredSurface(2, point, true) == 2 && invalidSurface.MapAuthoredSurface(7, point, true) == 8,
+            "An invalid supplied surface must preserve the stock row and unrelated placement.");
+        var errors = new List<string>();
+        var throwing = new TerrainPlacementRule("alpha.mod:failed", TerrainPlacementScope.Planets, stone, iron, 45,
+            depth: new TerrainAuthoredSurfaceDepthBand(0, 20), surfaceRadius: _ => throw new InvalidOperationException());
+        var faulty = TerrainPlacementPlan.Build(new[] { throwing, rules[1] }, TerrainPlacementScope.Planets, 45, Resolve, errors.Add);
+        Check(faulty.MapAuthoredSurface(2, point, false) == 2 && errors.Count == 0
+            && faulty.MapAuthoredSurface(2, point, true) == 2 && errors.Single().Contains("alpha.mod:failed")
+            && faulty.MapAuthoredSurface(7, point, true) == 8,
+            "Authored fields must avoid air samples and isolate a callback failure to its affected material.");
+        var noNativeDepth = TerrainPlacementPlan.Build(new[] { depthRule, rules[1] }, TerrainPlacementScope.Planets, 45,
+            Resolve, _ => {}, authoredSurfaceBands: false);
+        Check(!noNativeDepth.HasAuthoredSurfaceBands && noNativeDepth.Map(7) == 8,
+            "An incompatible authored surface audit must leave ordinary placement usable.");
+
         using var game = AssemblyDefinition.ReadAssembly(".refs/game/Assembly-CSharp.dll");
         var module = game.MainModule;
         void Audit(bool expected)
@@ -89,9 +148,20 @@ internal static class TerrainPlacementTests
         Audit(true);
         var nativeRadial = ContractAudit.EvaluateTerrainRadialPlacement(module);
         Check(nativeRadial.Available, nativeRadial.Reason);
+        var nativeDepth = ContractAudit.EvaluateTerrainAuthoredSurfacePlacement(module);
+        Check(nativeDepth.Available, nativeDepth.Reason);
         module.Mvid = Guid.NewGuid();
         Audit(true);
         Check(ContractAudit.EvaluateTerrainRadialPlacement(module).Available, "A different MVID rejected native planet coordinates.");
+        Check(ContractAudit.EvaluateTerrainAuthoredSurfacePlacement(module).Available,
+            "A different MVID rejected the unchanged authored surface contract.");
+        var density = module.GetType("World.Terrain.VoxelNodeData").Methods.Single(method => method.Name == "get_Density");
+        var densityScale = density.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldc_R4);
+        float originalScale = (float)densityScale.Operand;
+        densityScale.Operand = -originalScale;
+        Check(!ContractAudit.EvaluateTerrainAuthoredSurfacePlacement(module).Available
+            && ContractAudit.EvaluateTerrainRadialPlacement(module).Available, "Changing the density sign must disable only authored surface depth.");
+        densityScale.Operand = originalScale;
         var coordinates = module.GetType("World.Terrain.OctreeNodeData").Methods.Single(method => method.Name == "GetPosition");
         var centre = coordinates.Body.Instructions.First(instruction => instruction.OpCode == OpCodes.Ldc_R4);
         centre.Operand = 0f;
