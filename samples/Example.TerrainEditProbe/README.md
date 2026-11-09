@@ -34,3 +34,18 @@ A request is consumed once per game process. Use a new ID for each retry. The pr
 Each payload is a 64,000-byte little-endian capture of the native 20×20×20 sample lattice. Each sample contains 32-bit color, signed 16-bit density, and the two texture ID bytes in native index order. Use `Get-FileHash -Algorithm SHA256` on the payload to reproduce the log's hash. Negative density denotes solid material. A cut must increase density monotonically and convert at least one solid sample to air. A fill must decrease it monotonically and convert at least one air sample to solid.
 
 `TerrainNotReady` indicates a rejected fixture patch. Use a different loaded interior patch or wait for the native terrain jobs, then issue a new request. A missing payload or `accepted=False` is a failed acceptance check. Preserve the BepInEx log, the run configuration, and raw payloads for every result. The headless evidence tests validate request isolation and signed-density comparison. Rendered cut, fill, and persistence remain separate checks.
+
+## Optional automated fixture
+
+Use a fresh disposable solo Creative world in the starter system. A separate lab driver can create that world through the stock character UI. Set the following in the verified lab launch environment in addition to the managed profile, probe opt-in, and runtime feature settings above.
+
+| Variable | Value |
+| --- | --- |
+| SEVO_KEEL_TERRAIN_EDIT_FIXTURE | 1 |
+| SEVO_KEEL_TERRAIN_EDIT_FIXTURE_GAME | Exact isolated BepInEx game root |
+| SEVO_KEEL_TERRAIN_EDIT_FIXTURE_COMPANY | Exact isolated Unity company name |
+| SEVO_KEEL_TERRAIN_EDIT_FIXTURE_PRODUCT | Exact isolated Unity product name |
+
+The fixture waits for the Creative starter medbay to finish spawning the local player in a non-listening solo host. It follows the stock Survival introduction's native relocation to the existing starter planet, then scans for a dry resident patch and moves the player above it to stream the local detail. It uses a fixed system-space measurement ray across baseline, cut, and fill. It stops after the rebuilt fill or a failure. It requires no block or request file.
+
+A successful run reports **KEEL_TERRAIN_FIXTURE** with **accepted=True** and **detail=cut_and_fill_native_geometry_rebuilt**. The five **KEEL_TERRAIN_EDIT** evidence phases are **auto-baseline**, **auto-cut-write**, **auto-cut-rebuilt**, **auto-fill-write**, and **auto-fill-rebuilt**. The rebuilt collision ray must move by more than 0.1 metres in the expected direction while preserving the matching density hash and tree identity. Disk reload and baseline restoration use the separate manual procedure above.

@@ -15,7 +15,7 @@ namespace Sevo.Example.TerrainEditProbe
 {
     [BepInPlugin(Id, "Keel Terrain Edit Acceptance Probe", "0.1.0")]
     [BepInDependency(Plugin.Id)]
-    public sealed class Probe : BaseUnityPlugin
+    public sealed partial class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.terrainedit";
         private const string RequestFile = "terrain-edit-probe.request";
@@ -41,6 +41,7 @@ namespace Sevo.Example.TerrainEditProbe
 
             stateDirectory = state;
             session = activeSession!;
+            ArmAutomatedFixture();
             ContentRegistration.RegisterFunctionalBlock(Id, "anchor", 1, "Probe Terrain Edit Anchor",
                 () => TabHull.HULL_A, context => new Anchor(this, context));
         }
