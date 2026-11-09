@@ -35,8 +35,8 @@ namespace Sevo.Framework.Runtime
         private const string DiffuseGlobal = "WORLD_DIFFUSE_TEX";
         private const string NormalGlobal = "WORLD_NORMAL_TEX";
         private static readonly object Gate = new object();
-        private static readonly Dictionary<string, Declaration> Declarations = new Dictionary<string, Declaration>(StringComparer.Ordinal);
-        private static Declaration[]? sealedDeclarations;
+        private static readonly Dictionary<string, LayerRequest> Declarations = new Dictionary<string, LayerRequest>(StringComparer.Ordinal);
+        private static LayerRequest[]? sealedDeclarations;
         private static Action<string>? warning;
         private static FieldInfo? loaderDiffuse;
         private static FieldInfo? loaderNormal;
@@ -58,7 +58,7 @@ namespace Sevo.Framework.Runtime
             {
                 if (sealedDeclarations != null) throw new InvalidOperationException("Terrain texture declarations are closed for this process.");
                 if (Declarations.ContainsKey(key)) throw new InvalidOperationException("Duplicate terrain texture override: " + key);
-                Declarations.Add(key, new Declaration(key, nativeMaterialName, createLayers));
+                Declarations.Add(key, new LayerRequest(key, nativeMaterialName, createLayers));
             }
         }
 
@@ -109,12 +109,12 @@ namespace Sevo.Framework.Runtime
             return code;
         }
 
-        private static Declaration[] GetDeclarations()
+        private static LayerRequest[] GetDeclarations()
         {
             lock (Gate)
             {
                 if (sealedDeclarations != null) return sealedDeclarations;
-                var selected = new List<Declaration>();
+                var selected = new List<LayerRequest>();
                 foreach (var group in Declarations.Values.OrderBy(value => value.Key, StringComparer.Ordinal)
                     .GroupBy(value => value.MaterialName, StringComparer.Ordinal))
                 {
@@ -134,7 +134,7 @@ namespace Sevo.Framework.Runtime
             {
                 try
                 {
-                    var declarations = GetDeclarations();
+                    var declarations = GetDeclarations().Concat(TerrainMaterialRegistration.GetTextureRequests()).ToArray();
                     if (declarations.Length != 0 && TryPublishOverrides(buffer, rows, count, repo, declarations)) return;
                 }
                 catch (Exception exception)
@@ -148,7 +148,7 @@ namespace Sevo.Framework.Runtime
         }
 
         private static bool TryPublishOverrides(ComputeBufferHandler<TerrainMaterialData> buffer, NativeArray<TerrainMaterialData> rows,
-            int count, WorldTerrainResources repo, Declaration[] declarations)
+            int count, WorldTerrainResources repo, LayerRequest[] declarations)
         {
             var diffuse = loaderDiffuse!.GetValue(null) as Texture2DArray;
             var normal = loaderNormal!.GetValue(null) as Texture2DArray;
@@ -161,15 +161,13 @@ namespace Sevo.Framework.Runtime
             if (active == null) active = PrepareBinding(rows, repo, declarations, diffuse!, normal!);
             if (active == null) return false;
             var binding = active;
-            var originals = new TerrainMaterialData[binding.Layers.Length];
-            for (int i = 0; i < originals.Length; i++)
+            foreach (var layer in binding.Layers)
             {
-                var layer = binding.Layers[i];
-                if ((uint)layer.Row >= (uint)count || repo.terrainTextures[layer.Row].ShaderName != layer.Name
+                if ((uint)layer.Row >= (uint)repo.terrainTextures.Count || repo.terrainTextures[layer.Row].ShaderName != layer.Name
                     || rows[layer.Row].textureId != layer.StockLayer || binding.StockDiffuse != diffuse || binding.StockNormal != normal)
                     throw new InvalidOperationException("The stock terrain material changed during texture re-publication: " + layer.Name);
-                originals[i] = rows[layer.Row];
             }
+            var originals = binding.StockLayers.Select(layer => rows[layer.Row]).ToArray();
             try
             {
                 Shader.SetGlobalTexture(DiffuseGlobal, binding.Diffuse);
@@ -178,30 +176,32 @@ namespace Sevo.Framework.Runtime
                     throw new InvalidOperationException("Unity did not retain the terrain texture bindings.");
                 for (int i = 0; i < originals.Length; i++)
                 {
-                    var layer = binding.Layers[i];
+                    var layer = binding.StockLayers[i];
                     var row = originals[i];
-                    row.textureId = binding.FirstLayer + i;
-                    row.fadeValue = (Vector4)layer.Fade;
+                    ApplyLayer(layer, ref row);
                     rows[layer.Row] = row;
                 }
-                UploadRows(buffer, rows, count, repo);
+                if (!UploadRows(buffer, rows, count, repo) && binding.StockLayers.Length == 0)
+                    ReleaseBindings();
                 return true;
             }
             catch
             {
-                for (int i = 0; i < originals.Length; i++) rows[binding.Layers[i].Row] = originals[i];
+                for (int i = 0; i < originals.Length; i++) rows[binding.StockLayers[i].Row] = originals[i];
                 throw;
             }
         }
 
-        private static void UploadRows(ComputeBufferHandler<TerrainMaterialData> buffer, NativeArray<TerrainMaterialData> rows,
+        private static bool UploadRows(ComputeBufferHandler<TerrainMaterialData> buffer, NativeArray<TerrainMaterialData> rows,
             int count, WorldTerrainResources repo)
         {
-            if (!TerrainMaterialRegistration.TryPublish(buffer, rows, count, repo)) buffer.PushData(rows, count);
+            if (TerrainMaterialRegistration.TryPublish(buffer, rows, count, repo)) return true;
+            buffer.PushData(rows, count);
+            return false;
         }
 
         private static Binding? PrepareBinding(NativeArray<TerrainMaterialData> rows, WorldTerrainResources repo,
-            Declaration[] declarations, Texture2DArray diffuse, Texture2DArray normal)
+            LayerRequest[] declarations, Texture2DArray diffuse, Texture2DArray normal)
         {
             var accepted = new List<Layer>();
             foreach (var declaration in declarations)
@@ -222,7 +222,8 @@ namespace Sevo.Framework.Runtime
                         throw new InvalidOperationException("The factory did not return a live terrain texture.");
                     ValidateTexture(textures.Diffuse, diffuse);
                     ValidateTexture(textures.Normal, normal);
-                    accepted.Add(new Layer(row, declaration.MaterialName, stockLayer, textures));
+                    accepted.Add(new Layer(row, declaration.MaterialName, stockLayer, textures,
+                        declaration.IsRegisteredMaterial ? declaration.Key : null));
                 }
                 catch (Exception exception)
                 {
@@ -240,8 +241,11 @@ namespace Sevo.Framework.Runtime
                 newDiffuse = Expand(diffuse, firstLayer, accepted, layer => layer.Textures.Diffuse);
                 newNormal = Expand(normal, firstLayer, accepted, layer => layer.Textures.Normal);
                 for (int i = 0; i < accepted.Count; i++)
+                {
+                    accepted[i].TextureLayer = firstLayer + i;
                     accepted[i].Fade = newDiffuse.GetPixels(firstLayer + i, newDiffuse.mipmapCount - 1)[0];
-                return new Binding(diffuse, normal, newDiffuse, newNormal, firstLayer, accepted.ToArray());
+                }
+                return new Binding(diffuse, normal, newDiffuse, newNormal, accepted.ToArray());
             }
             catch
             {
@@ -249,6 +253,25 @@ namespace Sevo.Framework.Runtime
                 if (newNormal != null) Object.Destroy(newNormal);
                 throw;
             }
+        }
+
+        internal static void ApplyRegisteredTexture(string materialKey, ref TerrainMaterialData row)
+        {
+            var binding = active;
+            if (binding != null && binding.RegisteredLayers.TryGetValue(materialKey, out var layer)) ApplyLayer(layer, ref row);
+        }
+
+        internal static bool BindingsIntact()
+        {
+            var binding = active;
+            return binding == null || (Shader.GetGlobalTexture(DiffuseGlobal) == binding.Diffuse
+                && Shader.GetGlobalTexture(NormalGlobal) == binding.Normal);
+        }
+
+        private static void ApplyLayer(Layer layer, ref TerrainMaterialData row)
+        {
+            row.textureId = layer.TextureLayer;
+            row.fadeValue = (Vector4)layer.Fade;
         }
 
         private static bool IsSupported(Texture2DArray? atlas) => atlas != null && atlas.isReadable
@@ -340,56 +363,63 @@ namespace Sevo.Framework.Runtime
             ReleaseBindings();
         }
 
-        private sealed class Declaration
+        internal sealed class LayerRequest
         {
-            internal Declaration(string key, string materialName, Func<TerrainTextureLayers> createLayers)
+            internal LayerRequest(string key, string materialName, Func<TerrainTextureLayers> createLayers, bool isRegisteredMaterial = false)
             {
                 Key = key;
                 MaterialName = materialName;
                 CreateLayers = createLayers;
+                IsRegisteredMaterial = isRegisteredMaterial;
             }
 
             internal string Key { get; }
             internal string MaterialName { get; }
             internal Func<TerrainTextureLayers> CreateLayers { get; }
+            internal bool IsRegisteredMaterial { get; }
         }
 
         private sealed class Layer
         {
-            internal Layer(int row, string name, int stockLayer, TerrainTextureLayers textures)
+            internal Layer(int row, string name, int stockLayer, TerrainTextureLayers textures, string? registeredKey)
             {
                 Row = row;
                 Name = name;
                 StockLayer = stockLayer;
                 Textures = textures;
+                RegisteredKey = registeredKey;
             }
 
             internal int Row { get; }
             internal string Name { get; }
             internal int StockLayer { get; }
             internal TerrainTextureLayers Textures { get; }
+            internal string? RegisteredKey { get; }
+            internal int TextureLayer { get; set; }
             internal Color Fade { get; set; }
         }
 
         private sealed class Binding
         {
-            internal Binding(Texture2DArray stockDiffuse, Texture2DArray stockNormal, Texture2DArray diffuse, Texture2DArray normal,
-                int firstLayer, Layer[] layers)
+            internal Binding(Texture2DArray stockDiffuse, Texture2DArray stockNormal, Texture2DArray diffuse, Texture2DArray normal, Layer[] layers)
             {
                 StockDiffuse = stockDiffuse;
                 StockNormal = stockNormal;
                 Diffuse = diffuse;
                 Normal = normal;
-                FirstLayer = firstLayer;
                 Layers = layers;
+                StockLayers = layers.Where(layer => layer.RegisteredKey == null).ToArray();
+                RegisteredLayers = layers.Where(layer => layer.RegisteredKey != null)
+                    .ToDictionary(layer => layer.RegisteredKey!, StringComparer.Ordinal);
             }
 
             internal Texture2DArray StockDiffuse { get; }
             internal Texture2DArray StockNormal { get; }
             internal Texture2DArray Diffuse { get; }
             internal Texture2DArray Normal { get; }
-            internal int FirstLayer { get; }
             internal Layer[] Layers { get; }
+            internal Layer[] StockLayers { get; }
+            internal IReadOnlyDictionary<string, Layer> RegisteredLayers { get; }
         }
     }
 }

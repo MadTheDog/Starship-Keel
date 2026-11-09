@@ -17,7 +17,14 @@ if (TerrainMaterialRegistration.TryGetId("example.landforms:weathered-ridge", ou
 }
 ```
 
-The registered material has its own persistent voxel ID and uses the complete stock material row as backing, including its texture layers, surface type, terrain gradients and mining behavior. This preview registers identity and stock backing. Mod-supplied texture layers for a new material, custom item drops, scanner icons, and placement need their own verified contracts. Use [texture overrides](KEEL-TERRAIN-TEXTURES.md) to replace the texture layers of an existing material.
+The registered material has its own persistent voxel ID and uses a stock material row as backing, including its surface type, terrain gradients and default mining behavior. You can supply your own texture layers by enabling the [texture override capability](KEEL-TERRAIN-TEXTURES.md) and using the five-argument overload.
+
+```csharp
+TerrainMaterialRegistration.Register("example.landforms", "weathered-ridge", 1, "TEX_CLIFF_A",
+    () => new TerrainTextureLayers(diffuse: ridgeDiffuse));
+```
+
+Each replacement channel must match its native atlas for dimensions, graphics format and readable mip data. If one channel is omitted, Keel uses the original stock backing channel for that side. An unavailable texture capability or rejected texture request keeps the material's stock backing and persistent ID. The four-argument overload remains available for stock-backed materials. See the separate [mining drop hook](KEEL-TERRAIN-MINING-DROPS.md) for registered item replacements.
 
 Keel reserves native stock IDs and the top byte value. The profile's `terrain-material-registry.json` owns all assigned IDs. Keep it with the saves. Removed declarations keep their IDs as tombstones, which resolve to a stock rock row for saved voxels. They are unavailable to `TryGetId` and unavailable for new placement. Stock updates that occupy persisted mod IDs, invalid registries, or incompatible definitions require fixing the profile before world entry.
 

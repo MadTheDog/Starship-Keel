@@ -30,6 +30,16 @@ namespace Sevo.Framework.Runtime
 
         /// <summary>Declares a terrain material identity and its case-sensitive stock backing material during Awake.</summary>
         public static void Register(string ownerId, string localName, int revision, string stockBackingMaterial)
+            => RegisterCore(ownerId, localName, revision, stockBackingMaterial, null);
+
+        /// <summary>Declares a stock-backed material with optional replacement layers from a game-thread factory.</summary>
+        public static void Register(string ownerId, string localName, int revision, string stockBackingMaterial,
+            Func<TerrainTextureLayers> createLayers)
+            => RegisterCore(ownerId, localName, revision, stockBackingMaterial,
+                createLayers ?? throw new ArgumentNullException(nameof(createLayers)));
+
+        private static void RegisterCore(string ownerId, string localName, int revision, string stockBackingMaterial,
+            Func<TerrainTextureLayers>? createLayers)
         {
             string key = ownerId + ":" + localName;
             ContentAllocator.ValidateKey(key);
@@ -40,7 +50,7 @@ namespace Sevo.Framework.Runtime
             {
                 if (sealedDeclarations) throw new InvalidOperationException("Terrain material declarations are closed for this process.");
                 if (Declarations.ContainsKey(key)) throw new InvalidOperationException("Duplicate terrain material declaration: " + key);
-                Declarations.Add(key, new Declaration(revision, stockBackingMaterial));
+                Declarations.Add(key, new Declaration(revision, stockBackingMaterial, createLayers));
             }
         }
 
@@ -80,6 +90,18 @@ namespace Sevo.Framework.Runtime
 
         internal static void Disable() => enabled = false;
 
+        internal static TerrainTextureOverride.LayerRequest[] GetTextureRequests()
+        {
+            if (!enabled) return Array.Empty<TerrainTextureOverride.LayerRequest>();
+            lock (Gate)
+            {
+                sealedDeclarations = true;
+                return Declarations.Where(pair => pair.Value.CreateLayers != null).OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new TerrainTextureOverride.LayerRequest(pair.Key, pair.Value.BackingMaterial,
+                        pair.Value.CreateLayers!, isRegisteredMaterial: true)).ToArray();
+            }
+        }
+
         internal static bool HasPersistentTerrainMaterialState(ProfileSession session)
         {
             try
@@ -103,14 +125,14 @@ namespace Sevo.Framework.Runtime
                 if (json == null || RegistryJson.Read(json).Mappings.Count == 0) return null;
                 if (remoteLobby) return "This profile contains persistent Keel terrain materials. Use it in solo play.";
                 if (session != profile || !IsAvailable || !string.Equals(active?.Registry, json, StringComparison.Ordinal)
-                    || Shader.GetGlobalInt(CountGlobal) != active!.Rows.Length)
+                    || Shader.GetGlobalInt(CountGlobal) != active!.Rows.Length || !TerrainTextureOverride.BindingsIntact())
                     return "Keel could not restore the terrain materials required by this profile. "
                         + (failure ?? "Enable terrain material registration and restart with a compatible mod profile.");
                 var publication = active!;
                 for (int i = 0; i < publication.BackingRows.Length; i++)
                 {
-                    var expected = publication.Rows[publication.BackingRows[i]];
-                    if (!publication.Rows[publication.StockCount + i].Equals(expected))
+                    int rowId = publication.StockCount + i;
+                    if (!publication.Rows[rowId].Equals(GetBackingRow(publication, rowId)))
                         return "A live Keel terrain material row was overwritten. Restart with a compatible mod profile.";
                 }
                 return null;
@@ -151,7 +173,7 @@ namespace Sevo.Framework.Runtime
                 {
                     if (count != rows.Length || repo.terrainTextures.Count != publication.StockCount)
                         throw new InvalidOperationException("The live terrain material table changed before republishing.");
-                    SetBackingRows(rows, publication.StockCount, publication.BackingRows);
+                    SetBackingRows(publication);
                     buffer.PushData(rows, count);
                     failure = null;
                 }
@@ -201,8 +223,8 @@ namespace Sevo.Framework.Runtime
 
                 candidate = new NativeArray<TerrainMaterialData>(length, Allocator.Persistent);
                 NativeArray<TerrainMaterialData>.Copy(rows, candidate, count);
-                SetBackingRows(candidate, count, backingRows);
                 var publication = new Publication(rows, candidate, backingRows, ids, updated);
+                SetBackingRows(publication);
                 try
                 {
                     buffer.PushData(candidate, length);
@@ -244,21 +266,31 @@ namespace Sevo.Framework.Runtime
             return index;
         }
 
-        private static void SetBackingRows(NativeArray<TerrainMaterialData> rows, int stockCount, int[] backingRows)
+        private static void SetBackingRows(Publication publication)
         {
-            for (int i = 0; i < backingRows.Length; i++) rows[stockCount + i] = rows[backingRows[i]];
+            var rows = publication.Rows;
+            for (int id = publication.StockCount; id < rows.Length; id++) rows[id] = GetBackingRow(publication, id);
+        }
+
+        private static TerrainMaterialData GetBackingRow(Publication publication, int id)
+        {
+            var row = publication.Rows[publication.BackingRows[id - publication.StockCount]];
+            if (publication.Keys.TryGetValue(id, out var key)) TerrainTextureOverride.ApplyRegisteredTexture(key, ref row);
+            return row;
         }
 
         private sealed class Declaration
         {
-            internal Declaration(int revision, string backingMaterial)
+            internal Declaration(int revision, string backingMaterial, Func<TerrainTextureLayers>? createLayers)
             {
                 Revision = revision;
                 BackingMaterial = backingMaterial;
+                CreateLayers = createLayers;
             }
 
             internal int Revision { get; }
             internal string BackingMaterial { get; }
+            internal Func<TerrainTextureLayers>? CreateLayers { get; }
         }
 
         private sealed class Publication
