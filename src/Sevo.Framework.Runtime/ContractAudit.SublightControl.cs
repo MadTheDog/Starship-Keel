@@ -8,6 +8,43 @@ namespace Sevo.Framework.Runtime
 {
     public static partial class ContractAudit
     {
+        public static CapabilityResult EvaluatePreparedSublightControl(ModuleDefinition module)
+        {
+            const string capability = "preparedSublightControl";
+            const string ship = "Spaceship", core = "VoxelEngine.ComputerSpaceship";
+            const string computer = "VoxelEngine.ComputerBaseVehicle", quat = "UnityEngine.Quaternion";
+            try
+            {
+                if (!EvaluateSublightControl(module).Available)
+                    throw new InvalidOperationException("The stock sublight drive contract is unavailable.");
+                var enter = ContextMethod(module, ship, "Enter", false, "System.Void", "Game.PlayerCommandManager", quat, computer);
+                var getCore = ContextMethod(module, ship, "get_ComputerSpaceship", false, core);
+                var setCore = ContextMethod(module, ship, "set_ComputerSpaceship", false, "System.Void", core);
+                var linkYoke = ContextMethod(module, computer, "OnPredecessorAdded", false, "System.Void",
+                    "VoxelEngine.ICommand", "System.Boolean", "System.Boolean");
+                var setYokeOrientation = ContextMethod(module, computer, "set_inputOrientation", false, "System.Void", quat);
+                var read = getCore.Body.Instructions;
+                var write = setCore.Body.Instructions;
+                var assignment = enter.Body.Instructions.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Call
+                    && instruction.Operand is MethodReference method && method.FullName == setCore.FullName);
+                if (!getCore.IsPublic || !setCore.IsPrivate || read.Count != 3 || write.Count != 4
+                    || read[1].OpCode.Code != Code.Ldfld || read[1].Operand is not FieldReference retained
+                    || retained.DeclaringType.FullName != ship || retained.FieldType.FullName != core
+                    || write[2].OpCode.Code != Code.Stfld || write[2].Operand is not FieldReference stored
+                    || stored.FullName != retained.FullName || assignment?.Previous?.OpCode.Code != Code.Isinst
+                    || assignment.Previous.Operand is not TypeReference cast || cast.FullName != core
+                    || assignment.Previous.Previous?.OpCode.Code != Code.Ldarg_3
+                    || module.GetType(ship).Methods.Any(method => method != enter && method.HasBody && ContextCalls(method, setCore))
+                    || !ContextCalls(linkYoke, setYokeOrientation))
+                    throw new InvalidOperationException("Native retained flight computer or linked-yoke orientation changed.");
+                return new CapabilityResult(capability, true, "Validated retained stock flight computer and linked-yoke orientation.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
         public static CapabilityResult EvaluateSublightControl(ModuleDefinition module)
         {
             const string id = "sublightControl";

@@ -6,13 +6,17 @@ The lease requires `gridPhysics`, an audited stock sublight path and a managed s
 
 Only the exact registered, locally owned, dynamic spaceship is eligible. The stock computer and orientation must have been initialized through normal piloting in the current session. Acquisition waits for the stock post-exit control loop to finish. Pending stock entry and control by any stock pilot take precedence. Loss of power, authority, live core, suitable drive mode or attachment state ends the lease. Opening a menu pauses the managed physics callback and the input deadline continues to run. Lease end ceases further flight input, so existing momentum follows stock physics.
 
-This first contract exposes standard sublight only. Camera, ship possession, tactical systems, weapons, docking controls, warp and lightcruise use their own stock or mod paths. A newly loaded ship must first be piloted and exited normally. The lease and its input are transient across reload.
+For an earlier ship, check `SublightControlService.PreparedShipsAvailable` and call `TryAcquirePreparedShip(ownerId, grid, out lease)`. The target must be within 250 m in the same loaded system and retain its stock flight computer and matching live yoke orientation after ordinary piloting. The local player must be out of stock seats and command sessions. Pending stock transitions take precedence. Both acquisition methods share one lease and the same bounded analog input. A remote handset can switch between prepared ships, or a docking controller can maneuver an earlier prepared service ship.
+
+These contracts expose standard sublight only. Camera, ship possession, tactical systems, weapons, docking controls, warp and lightcruise use their own stock or mod paths. A newly loaded ship must first be piloted and exited normally. The lease and its input are transient across reload.
 
 ## Evidence and disposable acceptance
 
 The standalone suite tests axis bounds, independence from assembly MVID, and rejection of altered drive and stock post-exit call paths. A rendered disposable solo fixture on Steam build 26451593 / 26w45a loaded the bundled V27 Hotwing and entered and exited through stock authority. It refused the lease before piloting, while piloting, and during the stock post-exit loop. After the exit settled, the lease increased forward velocity by 0.311 m/s while native control mode stayed unoccupied. The fixture returned the pilot to the recorded starting point and removed its test ship. The lab used diagnostic job completion and a temporary Creative tutorial deferral.
 
 A separate rendered stress run verified that stale input was refused after expiry and that stock re-entry revoked a fresh lease. The fixture timed out during cleanup after the second exit.
+
+The prepared-ship fixture piloted and exited two stock Hotwings in the same disposable solo session. The original API declined the earlier ship. The prepared lease moved it forward by 0.270 m/s while native control mode remained unoccupied and pilot ID remained zero. The fixture removed both ships through stock cleanup.
 
 Use a locally owned powered test ship with a stock computer and unobstructed free space to extend the acceptance checks.
 

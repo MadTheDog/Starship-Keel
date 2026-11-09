@@ -101,6 +101,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult transferLinks;
                 CapabilityResult gridPhysics;
                 CapabilityResult sublightControl;
+                CapabilityResult preparedSublightControl;
                 CapabilityResult cameraView;
                 CapabilityResult mechanismPaths;
                 CapabilityResult gridAttachments;
@@ -170,6 +171,7 @@ namespace Sevo.Framework.Runtime
                     transferLinks = ContractAudit.EvaluateTransferLinks(metadata.MainModule);
                     gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
                     sublightControl = ContractAudit.EvaluateSublightControl(metadata.MainModule);
+                    preparedSublightControl = ContractAudit.EvaluatePreparedSublightControl(metadata.MainModule);
                     cameraView = ContractAudit.EvaluateCameraView(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
                     gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
@@ -437,9 +439,11 @@ namespace Sevo.Framework.Runtime
                     sublightControl = new CapabilityResult(sublightControl.Name, false, "Requires the grid physics hook.");
                 sublightControl = InstallContentHook(sublightControl, "EnableSublightControl", "SUBLIGHT_CONTROL", () =>
                 {
-                    SublightControlService.Enable(message => Logger.LogWarning(message));
+                    SublightControlService.Enable(message => Logger.LogWarning(message), preparedSublightControl.Available);
                     return sublightControl;
                 }, SublightControlService.Disable);
+                if (preparedSublightControl.Available && !sublightControl.Available)
+                    preparedSublightControl = new CapabilityResult(preparedSublightControl.Name, false, "Requires the sublight control hook.");
                 cameraView = InstallContentHook(cameraView, "EnableCameraView", "CAMERA_VIEW",
                     () => InstallContentHookPatches(cameraView, CameraViewService.Install, CameraViewService.Disable));
                 mechanismPaths = InstallContentHook(mechanismPaths, "EnableMechanismPaths", "MECHANISM_PATHS",
@@ -491,7 +495,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

@@ -43,4 +43,30 @@ bool Axis(float x, float y, float z) => (bool)valid.Invoke(null, new object[] { 
 Check(Axis(0f, 0f, 0f) && Axis(-1f, .5f, 1f), "Neutral and bounded analog axes are accepted.");
 Check(!Axis(float.NaN, 0, 0) && !Axis(0, float.PositiveInfinity, 0) && !Axis(0, 0, 1.01f),
     "Nonfinite or excessive controls are rejected.");
+var preparedAudit = typeof(ContractAudit).GetMethod("EvaluatePreparedSublightControl")
+    ?? throw new Exception("Missing prepared sublight control audit.");
+bool PreparedAvailable() => ((CapabilityResult)preparedAudit.Invoke(null, new object[] { module })!).Available;
+Check(PreparedAvailable(), "The stock ship retains its initialized flight computer after piloting.");
+module.Mvid = Guid.NewGuid();
+try { Check(PreparedAvailable(), "Prepared flight must not depend on assembly identity."); }
+finally { module.Mvid = originalMvid; }
+
+void BreakPreparedContract(string type, string method, Func<Instruction, bool> match)
+{
+    var instruction = module.GetType(type).Methods.Single(item => item.Name == method).Body.Instructions.Single(match);
+    var original = instruction.OpCode;
+    instruction.OpCode = OpCodes.Nop;
+    try
+    {
+        Check(Available(), "Prepared-only changes must leave the last-piloted lease available.");
+        Check(!PreparedAvailable(), $"Changed retained control state in {method} must reject prepared flight.");
+    }
+    finally { instruction.OpCode = original; }
+}
+BreakPreparedContract("Spaceship", "Enter", item => item.Operand is MethodReference target && target.Name == "set_ComputerSpaceship");
+BreakPreparedContract("Spaceship", "get_ComputerSpaceship", item => item.OpCode.Code == Code.Ldfld);
+BreakPreparedContract("Spaceship", "set_ComputerSpaceship", item => item.OpCode.Code == Code.Stfld);
+BreakPreparedContract("VoxelEngine.ComputerBaseVehicle", "OnPredecessorAdded",
+    item => item.Operand is MethodReference target && target.Name == "set_inputOrientation");
+
 Console.WriteLine("Sublight control policy and native contract checks passed.");
