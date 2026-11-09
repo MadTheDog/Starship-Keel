@@ -4,6 +4,9 @@ namespace Sevo.Framework.Runtime
 {
     internal static class TerrainEditMath
     {
+        internal static int ClosestLatticeIndex(float offsetFromFirstSample, float spacing, int width)
+            => (int)Math.Clamp(Math.Round((double)offsetFromFirstSample / spacing), 0d, width - 1d);
+
         // Negative density denotes solid terrain. Intersect the half-space with a bounded sphere.
         internal static float Combine(float existing, float boundary, float plane, bool fill)
         {

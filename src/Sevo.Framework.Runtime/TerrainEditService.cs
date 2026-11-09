@@ -21,6 +21,7 @@ namespace Sevo.Framework.Runtime
         private const int MaximumNodes = 8;
         private static Action<string>? warn;
         private static bool enabled;
+        private static bool reportPreflight;
         private static int lastEditFrame = -1;
 
         public static bool IsAvailable => enabled && WorldSurfaceQuery.IsAvailable;
@@ -29,6 +30,7 @@ namespace Sevo.Framework.Runtime
         {
             warn = logWarning;
             enabled = true;
+            reportPreflight = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_EDIT_DIAGNOSTICS") == "1";
             lastEditFrame = -1;
         }
 
@@ -114,11 +116,19 @@ namespace Sevo.Framework.Runtime
                 {
                     if (id <= 0 || id >= table.Length) return TerrainEditResult.TerrainNotReady;
                     var node = table[id];
+                    if (!float.IsFinite(node.VoxelSize) || node.VoxelSize <= 0f) return TerrainEditResult.TerrainNotReady;
                     if (!OctreeNodeResources.ShouldSaveNode((int)node.VoxelSize)) continue;
-                    if (!DensityLatticeTouches(node, centre, radiusVector)) continue;
+                    if (!DensityLatticeTouches(node, centre, radius)) continue;
                     if (nodes.Count == MaximumNodes || !IsResident(node) || (id != selected.ultimateParentId && node.ultimateParentId != selected.ultimateParentId)
                         || node.planetGenerationId != selected.planetGenerationId || node.asteroidId != 0 || !densityIds.Add(node.densitiesId))
+                    {
+                        if (reportPreflight)
+                        {
+                            reportPreflight = false;
+                            warn?.Invoke($"Terrain edit preflight rejected node {id} (selected {hit.elementId}, voxel {node.VoxelSize}, state {node.geoState}, density slot {node.densitiesId}, computed {node.densityComputed}, busy {node.isJobStarted}, accepted nodes {nodes.Count}).");
+                        }
                         return TerrainEditResult.TerrainNotReady;
+                    }
                     var prepared = new PreparedNode(id, node);
                     nodes.Add(prepared);
                     prepared.Stage(centre, normal, planeOffset, radius, fill, fillMaterial);
@@ -152,15 +162,17 @@ namespace Sevo.Framework.Runtime
             }
         }
 
-        private static bool DensityLatticeTouches(OctreeNodeData node, Vector3 centre, Vector3 radius)
+        private static bool DensityLatticeTouches(OctreeNodeData node, Vector3 centre, float radius)
         {
-            int end = OctreeNodeData.DENSITY_WIDTH - 1;
-            Vector3 first = (Vector3)node.position + (Vector3)node.GetPosition(0, 0, 0);
-            Vector3 last = (Vector3)node.position + (Vector3)node.GetPosition(end, end, end);
-            Vector3 min = centre - radius;
-            Vector3 max = centre + radius;
-            return first.x <= max.x && last.x >= min.x && first.y <= max.y && last.y >= min.y
-                && first.z <= max.z && last.z >= min.z;
+            Vector3 relativeCentre = (Vector3)node.position - centre;
+            Vector3 first = relativeCentre + (Vector3)node.GetPosition(0, 0, 0);
+            int width = OctreeNodeData.DENSITY_WIDTH;
+            float spacing = node.VoxelSize;
+            int x = TerrainEditMath.ClosestLatticeIndex(-first.x, spacing, width);
+            int y = TerrainEditMath.ClosestLatticeIndex(-first.y, spacing, width);
+            int z = TerrainEditMath.ClosestLatticeIndex(-first.z, spacing, width);
+            Vector3 offset = relativeCentre + (Vector3)node.GetPosition(x, y, z);
+            return offset.sqrMagnitude < radius * radius;
         }
 
         private static bool IsResident(OctreeNodeData node)

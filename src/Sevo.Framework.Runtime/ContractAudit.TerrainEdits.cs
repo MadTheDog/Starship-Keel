@@ -48,8 +48,10 @@ namespace Sevo.Framework.Runtime
                     "Unity.Collections.NativeList`1<System.Int32>", integer, "System.Single");
                 var removeProps = Require("World.PropNodeItems", "RemoveGrassAndPlants", true, nothing, "Vector3l", node + "&");
                 Require(node, "get_DensityBoundsTight", false, "UnityEngine.Bounds");
-                Require(node, "get_VoxelSize", false, "System.Single");
-                Require(node, "GetPosition", false, "Unity.Mathematics.float3", integer, integer, integer);
+                var voxelSize = Require(node, "get_VoxelSize", false, "System.Single");
+                var samplePosition = Require(node, "GetPosition", false, "Unity.Mathematics.float3", integer, integer, integer);
+                if (!MatchesTerrainSampleLattice(samplePosition, voxelSize))
+                    throw new InvalidOperationException("Native terrain sample lattice is no longer the audited affine grid.");
                 Require(sample, "ToDensityId", true, integer, integer, integer, integer);
                 Require(sample, "get_Density", false, "System.Single");
                 var compress = Require(sample, "CompressDensity", true, "System.Int16", "System.Single");
@@ -135,6 +137,36 @@ namespace Sevo.Framework.Runtime
             catch (Exception exception)
             {
                 return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
+        private static bool MatchesTerrainSampleLattice(MethodDefinition position, MethodDefinition voxelSize)
+        {
+            if (!position.HasBody) return false;
+            var il = position.Body.Instructions.Where(instruction => instruction.OpCode.Code != Code.Nop).ToArray();
+            if (il.Length != 23 || il[0].OpCode.Code != Code.Ldarg_0 || il[1].OpCode.Code != Code.Call
+                || il[1].Operand is not MethodReference spacing || spacing.FullName != voxelSize.FullName)
+                return false;
+
+            // Each axis is (index - DENSITY_HW) + 0.5, followed by one vector-wide spacing multiply.
+            return MatchesAxis(2, Code.Ldarg_1) && MatchesAxis(8, Code.Ldarg_2) && MatchesAxis(14, Code.Ldarg_3)
+                && il[20].OpCode.Code == Code.Newobj && il[20].Operand is MethodReference ctor
+                && ctor.FullName == "System.Void Unity.Mathematics.float3::.ctor(System.Single,System.Single,System.Single)"
+                && il[21].OpCode.Code == Code.Call && il[21].Operand is MethodReference scale
+                && scale.FullName == "Unity.Mathematics.float3 Unity.Mathematics.float3::op_Multiply(System.Single,Unity.Mathematics.float3)"
+                && il[22].OpCode.Code == Code.Ret;
+
+            bool MatchesAxis(int start, Code argument)
+            {
+                var halfWidth = il[start + 1];
+                bool matchesHalfWidth = halfWidth.OpCode.Code == Code.Ldc_I4_S
+                    && halfWidth.Operand is sbyte small && small == OctreeNodeData.DENSITY_HW
+                    || halfWidth.OpCode.Code == Code.Ldc_I4
+                    && halfWidth.Operand is int wide && wide == OctreeNodeData.DENSITY_HW;
+                return il[start].OpCode.Code == argument && matchesHalfWidth
+                    && il[start + 2].OpCode.Code == Code.Sub && il[start + 3].OpCode.Code == Code.Conv_R4
+                    && il[start + 4].OpCode.Code == Code.Ldc_R4 && il[start + 4].Operand is 0.5f
+                    && il[start + 5].OpCode.Code == Code.Add;
             }
         }
     }

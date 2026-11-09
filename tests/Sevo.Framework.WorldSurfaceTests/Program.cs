@@ -56,6 +56,17 @@ try
 }
 finally { copy.OpCode = copyOpcode; }
 
+var position = module.GetType("World.Terrain.OctreeNodeData").Methods.Single(method => method.Name == "GetPosition");
+var half = position.Body.Instructions.First(instruction => instruction.OpCode.Code == Code.Ldc_R4);
+half.Operand = 0.75f;
+try
+{
+    var result = EditAudit();
+    if (result.Available || !result.Reason.Contains("lattice"))
+        throw new Exception("The terrain edit audit admitted nonuniform native lattice origins.");
+}
+finally { half.Operand = 0.5f; }
+
 var sampleMath = typeof(ContractAudit).Assembly.GetType("Sevo.Framework.Runtime.TerrainEditMath")
     ?? throw new Exception("Expected terrain brush density math.");
 var combine = sampleMath.GetMethod("Combine", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
@@ -71,4 +82,19 @@ Equal(-2f, Combine(-2f, 1f, 1f, false));
 Equal(-1f, Combine(2f, -2f, -1f, true));
 Equal(1f, Combine(2f, -2f, 1f, true));
 Equal(2f, Combine(2f, 1f, -1f, true));
+var nearest = sampleMath.GetMethod("ClosestLatticeIndex", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
+    ?? throw new Exception("Expected the terrain lattice nearest-sample helper.");
+int Nearest(float offset, float spacing, int width)
+    => (int)nearest.Invoke(null, new object[] { offset, spacing, width })!;
+bool LatticeHit(float offset, float spacing, int width, float radius)
+{
+    float distance = Nearest(offset, spacing, width) * spacing - offset;
+    return 3f * distance * distance < radius * radius;
+}
+if (LatticeHit(4f, 8f, 20, 3f))
+    throw new Exception("A brush inside the coarse lattice bounds did not reach any sample.");
+if (!LatticeHit(7f, 8f, 20, 3f))
+    throw new Exception("An interior sample reached by the brush was missed.");
+if (Nearest(-100f, 2f, 20) != 0 || Nearest(100f, 2f, 20) != 19)
+    throw new Exception("The nearest-sample lookup did not clamp to lattice endpoints.");
 Console.WriteLine("Terrain edit native contracts and bounded signed density math passed.");
