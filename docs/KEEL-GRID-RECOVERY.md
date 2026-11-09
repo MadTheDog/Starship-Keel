@@ -7,3 +7,5 @@ Keel verifies that the same entity is still registered under its persistent grid
 NPC ownership transfer and generated world wreck conversion are separate gameplay transitions. The recovery call leaves eligibility and hull state with the game.
 
 In a disposable solo world, verify that an eligible defeated player grid recovers after repairs, while a healthy grid, a grid below the native threshold, an NPC and a generated wreck do not. Unload the candidate and confirm a stale reference cannot trigger recovery.
+
+On Steam build 26451593 / 26w45a, the [rendered recovery probe](../samples/Example.GridRecoveryProbe/README.md) refused a healthy grid and a defeated player-owned hull at 2.1% against the stock 85% threshold. Stock repair also restored the grid automatically. The fixture then used stock defeat on the same repaired hull, waited for the queued destruction update, and verified explicit Keel recovery with the same native object and persistent ID. A later callback confirmed the grid stayed recovered and a stale reference was refused after native cleanup. The lab used diagnostic completion for stalled stock render-end jobs.
