@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>Sevo.Example.LogicOutputProbe</AssemblyName>
+    <ProbeManagedPath Condition="'$(ProbeManagedPath)' == ''">..\..\lab\game\Starship EVO_Data\Managed</ProbeManagedPath>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" Private="false" />
@@ -10,5 +11,7 @@
     <Reference Include="UnityEngine" HintPath="../../.refs/game/UnityEngine.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="../../.refs/game/UnityEngine.CoreModule.dll" Private="false" />
     <Reference Include="Mirror" HintPath="../../.refs/game/Mirror.dll" Private="false" />
+    <Reference Include="MessagePack" HintPath="$(ProbeManagedPath)\MessagePack.dll" Private="false" />
+    <Reference Include="MessagePack.Annotations" HintPath="$(ProbeManagedPath)\MessagePack.Annotations.dll" Private="false" />
   </ItemGroup>
 </Project>

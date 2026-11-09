@@ -40,8 +40,8 @@ namespace Sevo.Framework.Runtime
         /// <summary>Requests a native release. The stock command clears its saved attachment on acceptance.</summary>
         public static bool TryRequestRelease(BrickCoord mount)
         {
-            if (!TryResolveMount(mount, out var command) || requesting || HasPendingRequest()
-                || !ReadData(command!).isLockingEntity)
+            if (!TryResolveMount(mount, out var command) || requesting || !ReadData(command!).isLockingEntity
+                || (HasPendingRequest() && (pendingRelease || !ReferenceEquals(pendingMount, command))))
                 return false;
             return Request(command!, true, out _);
         }

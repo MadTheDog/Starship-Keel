@@ -2,7 +2,7 @@
 
 Use an isolated managed solo world. Enable Keel's experimental functional blocks and logic outputs, and launch the lab with `SEVO_KEEL_LOGIC_OUTPUT_FIXTURE=1`. The managed launch must supply `SEVO_PLATFORM_STATE_DIR` and a distinct `SEVO_PLATFORM_SESSION`. Load this sample DLL alongside the candidate Keel runtime. The existing surface sensor does not need to be used.
 
-## Build the rig
+## Build the rig manually
 
 1. On a single test grid, place **Probe Native Logic Fixture**, one stock Switch and three stock Event Gates. Start with the Switch off.
 2. Use the stock Link Tool to link Switch → fixture and fixture → each of the three gates. The fixture must have exactly these three output links, with one source link on each gate.
@@ -17,4 +17,19 @@ Run `Read-LogicOutputEvidence.ps1 -LogPath <isolated BepInEx LogOutput.log> -Ses
 
 To verify disk restoration, relaunch the saved rig with a new managed session ID, enable the fixture again, and turn the Switch on without relinking the gates. Use the same reader with `-RequireLoaded` and the new ID. This verifies the restored source and channel selections by exercising them through the native gates. Stock control is independent. Repeat a regular stock switch and gate setup in the same world.
 
-The fixture uses existing placed commands and reads public live job records. It does not spawn or rewrite links or reconfigure the gate. Keel capability admission, game launch, and the rendered fixture observations are separate verification steps.
+## Build and arm the rig automatically
+
+1. Verify the isolated lab identity in the checkout's `local-evidence/lab-identity.json` and confirm its LocalLow junction targets that lab's disposable profile. Use a fresh world in that profile.
+2. Keep the manual fixture flag and the managed session variables above. Set `SEVO_PLATFORM_EXPERIMENTAL_CONTENT=1` and these additional environment variables before launching the isolated lab.
+
+   | Environment variable | Value |
+   | --- | --- |
+   | `SEVO_KEEL_LOGIC_OUTPUT_FIXTURE_BUILD` | `1` |
+   | `SEVO_KEEL_LOGIC_OUTPUT_FIXTURE_GAME` | Absolute game directory from `lab-identity.json` |
+   | `SEVO_KEEL_LOGIC_OUTPUT_FIXTURE_COMPANY` | Company from `lab-identity.json` |
+   | `SEVO_KEEL_LOGIC_OUTPUT_FIXTURE_PRODUCT` | Product from `lab-identity.json` |
+
+3. Enter a fresh solo creative world. The fixture checks the managed launch, Unity lab identity, local player and native builder phase before creating a separate grid about 25 meters above the player. It places and wires the fixture via stock builder and command link calls, configures the gates through their stock save-data handler, and activates the Switch. Let the sequence finish. After the propagation pass, it removes its own source via the native builder, verifies that all three gates remain and have no predecessor, and leaves the Switch and gates in the disposable world.
+4. Run `Read-LogicOutputEvidence.ps1 -LogPath <isolated BepInEx LogOutput.log> -Session <SEVO_PLATFORM_SESSION> -RequireAutomaticBuild -RequireDespawnReset`. Use the manual rig for disk restoration so the source is available to save before teardown.
+
+The automation uses the same native build and link entry points as Example.FunctionalProbe. The automated logic fixture has been compiled and its log reader checked against synthetic records. Its rendered behavior still needs to be observed in the isolated game.

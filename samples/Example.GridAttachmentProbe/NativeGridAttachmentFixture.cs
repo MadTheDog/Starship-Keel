@@ -4,6 +4,7 @@ using BepInEx;
 using Manager;
 using Mirror;
 using Sevo.Framework.Runtime;
+using Sevo.Framework.Sdk;
 using UnityEngine;
 using VoxelEngine;
 
@@ -27,14 +28,17 @@ namespace Sevo.Example.GridAttachmentProbe
                 string? game = Environment.GetEnvironmentVariable("SEVO_KEEL_GRID_ATTACHMENT_FIXTURE_GAME");
                 string? company = Environment.GetEnvironmentVariable("SEVO_KEEL_GRID_ATTACHMENT_FIXTURE_COMPANY");
                 string? product = Environment.GetEnvironmentVariable("SEVO_KEEL_GRID_ATTACHMENT_FIXTURE_PRODUCT");
+                string? state = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
+                string session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION") ?? "";
                 Require(Environment.GetEnvironmentVariable("SEVO_PLATFORM_EXPERIMENTAL_CONTENT") == "1"
-                    && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR"))
+                    && Guid.TryParseExact(session, "N", out _) && !string.IsNullOrWhiteSpace(state)
                     && !string.IsNullOrWhiteSpace(game) && !string.IsNullOrWhiteSpace(company) && !string.IsNullOrWhiteSpace(product)
                     && company != "Moonfire Entertainment" && product != "Starship EVO"
                     && Application.companyName == company && Application.productName == product
                     && string.Equals(Path.GetFullPath(game!).TrimEnd(Path.DirectorySeparatorChar),
                         Path.GetFullPath(Paths.GameRootPath).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase),
                     "Fixture requires a matching isolated lab path, product and managed experimental profile.");
+                ProfileProtocol.Open(state!, Paths.GameRootPath, session);
                 MoveTo(FixtureStep.SpawnMount, 120f);
             }
             catch (Exception exception) { Fail(exception); }

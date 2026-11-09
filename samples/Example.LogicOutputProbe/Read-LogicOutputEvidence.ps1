@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$Session,
     [int]$SourceId,
     [switch]$RequireLoaded,
-    [switch]$RequireDespawnReset
+    [switch]$RequireDespawnReset,
+    [switch]$RequireAutomaticBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,10 @@ $records = @(
         }
     }
 )
+if ($RequireAutomaticBuild) {
+    $startupFailure = $records | Where-Object { $_.SourceId -eq 0 -and $_.Event -eq 'fail' } | Select-Object -First 1
+    if ($startupFailure) { throw "Automated fixture setup failed. $($startupFailure.Detail)" }
+}
 if (!$PSBoundParameters.ContainsKey('SourceId')) {
     $ids = @($records | Select-Object -ExpandProperty SourceId -Unique)
     if ($ids.Count -ne 1) { throw "Expected exactly one probe source for session '$Session'." }
@@ -29,7 +34,9 @@ $trace = @($records | Where-Object SourceId -eq $SourceId)
 $failure = $trace | Where-Object Event -eq 'fail' | Select-Object -First 1
 if ($failure) { throw "Native logic fixture failed. $($failure.Detail)" }
 
-$expected = [ordered]@{
+$expected = [ordered]@{}
+if ($RequireAutomaticBuild) { $expected.Add('automated-built', 'native placement and four stock links verified') }
+$propagation = [ordered]@{
     arm = $null
     baseline = $null
     high = 'src=1,1,7.25;job=1,1,1;gate=0,1,1'
@@ -38,8 +45,10 @@ $expected = [ordered]@{
     'held-high' = 'src=1,1,7.25;job=1,1,1;gate=0,0,1'
     pass = $null
 }
+foreach ($name in $propagation.Keys) { $expected.Add($name, $propagation[$name]) }
 $reset = @($trace | Where-Object Event -eq 'despawn')
 if ($RequireDespawnReset -or $reset.Count -gt 0) { $expected.Add('despawn', 'signal=0,pulse=0,value=0') }
+if ($RequireAutomaticBuild) { $expected.Add('automated-unlinked', 'all three stock gates retained and unlinked') }
 $last = -1
 foreach ($name in $expected.Keys) {
     $matches = @(for ($i = 0; $i -lt $trace.Count; $i++) { if ($trace[$i].Event -ceq $name) { $i } })
@@ -60,5 +69,6 @@ if ($baseline.Detail -cnotmatch '^src=0,0,0;job=0,0,0;gate=[01],[01],[01]$') { t
     SourceId = $SourceId
     Placement = $arm.Detail
     Channels = 'Native signal inversion, pulse and value threshold observed'
+    AutomatedBuildAndUnlink = if ($RequireAutomaticBuild) { 'observed' } else { 'not requested' }
     DespawnReset = if ($reset.Count -eq 1) { 'observed' } else { 'unobserved' }
 }
