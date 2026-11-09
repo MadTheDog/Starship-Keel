@@ -1,14 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using BepInEx;
 using HarmonyLib;
+using Manager;
 using Sevo.Framework.Sdk;
 using Unity.Collections;
+using UnityEngine;
 using UnityEngine.Rendering;
+using VoxelEngine;
 using World;
 using World.Terrain;
 using Placement = Sevo.Framework.Runtime.TerrainPlacement;
@@ -31,6 +36,16 @@ namespace Sevo.Example.TerrainPlacement
         private byte destination;
         private bool useCustom;
         private bool radial;
+        private bool diagnostics;
+        private int diagnosticReports;
+        private float nextDiagnosticReport;
+        private int dispatches;
+        private int readbacks;
+        private int readbackErrors;
+        private int planetReadbacks;
+        private int unresolvedReadbacks;
+        private int observedCopies;
+        private int submittedDispatches;
         private bool tested;
         private bool testedBaked;
         private bool sawRaw;
@@ -56,6 +71,7 @@ namespace Sevo.Example.TerrainPlacement
             instance = this;
             useCustom = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_CUSTOM") == "1";
             radial = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL") == "1";
+            diagnostics = radial && Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_DIAGNOSTICS") == "1";
             var requested = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_SOURCES");
             if (!string.IsNullOrWhiteSpace(requested))
                 sources = requested!.Split(';').Select(name => name.Trim()).Where(name => name.Length > 0)
@@ -74,6 +90,11 @@ namespace Sevo.Example.TerrainPlacement
                 postfix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveRaw)));
             hook.Patch(AccessTools.DeclaredMethod(typeof(OctreeNodeResources), nameof(OctreeNodeResources.SetVoxelData)),
                 prefix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObservePublication)));
+            if (diagnostics)
+                hook.Patch(AccessTools.DeclaredMethod(typeof(DensityComputeJob), "Dispatch"),
+                    prefix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveDispatch)));
+            if (diagnostics && Environment.GetEnvironmentVariable("SEVO_KEEL_LAB_SUBMIT_TERRAIN_BUFFER") == "1")
+                InstallLabSubmission(hook);
             if (!radial)
             {
                 hook.Patch(AccessTools.DeclaredMethod(typeof(DensityComputeJob), nameof(DensityComputeJob.DispatchImmediate)),
@@ -89,9 +110,61 @@ namespace Sevo.Example.TerrainPlacement
             if (ReferenceEquals(instance, this)) instance = null;
         }
 
+        private void Update()
+        {
+            if (!diagnostics || tested || diagnosticReports == 8 || PlayerState.sessionMode != PlayerState.SessionMode.solo
+                || Time.unscaledTime < nextDiagnosticReport) return;
+            nextDiagnosticReport = Time.unscaledTime + 10f;
+            diagnosticReports++;
+            Logger.LogInfo("TERRAIN RADIAL PLACEMENT PROBE DIAGNOSTICS "
+                + $"dispatches={Volatile.Read(ref dispatches)} readbacks={Volatile.Read(ref readbacks)} "
+                + $"readbackErrors={Volatile.Read(ref readbackErrors)} planetReadbacks={Volatile.Read(ref planetReadbacks)} "
+                + $"unresolvedReadbacks={Volatile.Read(ref unresolvedReadbacks)} comparedCopies={observedCopies} "
+                + $"inside={insideBand} outside={outsideBand} levels={remappedLevels.Count}");
+        }
+
+        private static void ObserveDispatch()
+        {
+            var self = instance;
+            if (self != null) Interlocked.Increment(ref self.dispatches);
+        }
+
+        private static void InstallLabSubmission(Harmony harmony)
+        {
+            var session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION");
+            var state = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
+            var game = Environment.GetEnvironmentVariable("SEVO_KEEL_LAB_TERRAIN_GAME");
+            if (Application.companyName != "SEVO Keel Gen Lab 0110" || Application.productName != "SEVO WG Test"
+                || Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_DRAIN_STALLED_FRAME") != "1"
+                || !Guid.TryParseExact(session, "N", out _) || string.IsNullOrEmpty(state) || string.IsNullOrEmpty(game)
+                || !string.Equals(Path.GetFullPath(game), Path.GetFullPath(Paths.GameRootPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Terrain buffer submission requires the exact isolated Keel generation lab.");
+            Sevo.Framework.Runtime.ProfileProtocol.Open(state, Paths.GameRootPath, session!);
+            var start = AccessTools.DeclaredMethod(typeof(DensityComputeJob), nameof(DensityComputeJob.CheckForJobStart));
+            harmony.Patch(start, postfix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(SubmitLabBuffer)));
+        }
+
+        private static void SubmitLabBuffer()
+        {
+            var self = instance;
+            if (self == null || !GameloopManager.IsMainThread || PlayerState.sessionMode != PlayerState.SessionMode.solo) return;
+            var buffer = VoxelRenderingManager.TerrainCommandBuffer;
+            int queued = Volatile.Read(ref self.dispatches);
+            if (queued == self.submittedDispatches || buffer == null || buffer.sizeInBytes == 0) return;
+            Graphics.ExecuteCommandBuffer(buffer);
+            buffer.Clear();
+            if (self.submittedDispatches == 0) self.Logger.LogInfo("TERRAIN RADIAL PLACEMENT PROBE manually submitted the lab's native terrain buffer.");
+            self.submittedDispatches = queued;
+        }
+
         private static void ObserveRaw(AsyncGPUReadbackRequest __0, NativeArray<VoxelNodeData> ___voxelNodeDatas, int ___nodeId)
         {
             var self = instance;
+            if (self?.diagnostics == true)
+            {
+                Interlocked.Increment(ref self.readbacks);
+                if (__0.hasError) Interlocked.Increment(ref self.readbackErrors);
+            }
             if (self == null || self.tested || !Placement.IsAvailable || __0.hasError
                 || PlayerState.sessionMode != PlayerState.SessionMode.solo || !___voxelNodeDatas.IsCreated) return;
             try
@@ -103,12 +176,21 @@ namespace Sevo.Example.TerrainPlacement
                     if (!Placement.AreRadialBandsAvailable || ___nodeId <= 0) return;
                     var node = OctreeNodeResources.OctreeNodeDatas[___nodeId];
                     if (node.planetGenerationId == 0) return;
+                    if (self.diagnostics) Interlocked.Increment(ref self.planetReadbacks);
                     var body = PlanetarySystem.SolarBodies.FirstOrDefault(value => value.planetGenerationId == node.planetGenerationId);
-                    if (body == null || body.radius <= 0) return;
+                    if (body == null || body.radius <= 0)
+                    {
+                        if (self.diagnostics) Interlocked.Increment(ref self.unresolvedReadbacks);
+                        return;
+                    }
                     radialNode = node;
                     radialRadius = body.radius;
                 }
-                if (self.sourceIds.Count == 0 && !self.ResolveFixtureIds()) return;
+                if (self.sourceIds.Count == 0 && !self.ResolveFixtureIds())
+                {
+                    if (self.diagnostics) Interlocked.Increment(ref self.unresolvedReadbacks);
+                    return;
+                }
                 if (!self.sawRaw)
                 {
                     self.sawRaw = true;
@@ -167,6 +249,7 @@ namespace Sevo.Example.TerrainPlacement
             self.original = null;
             if (self.radial)
             {
+                self.observedCopies++;
                 self.CheckRadial(before, __1);
                 return;
             }

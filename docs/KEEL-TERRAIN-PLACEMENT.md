@@ -39,3 +39,7 @@ Build [Example.TerrainPlacement](../samples/Example.TerrainPlacement/Example.Ter
 Set `SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL=1` and enter a new solo world to compare inside- and outside-band planet samples before the stock octree copy. The probe requires remapped solid samples in two levels and unchanged solid samples outside the band.
 
 In Keel's isolated lab, build the Fluid Probe sample as well and set `SEVO_KEEL_LAB_BOOT_SURVIVAL=1` with the runner's `-FluidProbe` switch to start the stock Survival introduction near the planet. The boot fixture skips the fluid test in this mode.
+
+Set `SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_DIAGNOSTICS=1` for bounded dispatch, readback, and octree copy counters. If the isolated renderer stalls, the sample can submit the already recorded stock terrain command buffer. This path requires the runner's `-DiagnosticJobCompletion` switch, `SEVO_KEEL_LAB_SUBMIT_TERRAIN_BUFFER=1`, and `SEVO_KEEL_LAB_TERRAIN_GAME` set to the exact managed lab game path. Keel's runtime does not use this fallback.
+
+On Steam build 26451593 / 26w45a, the Survival lab observed remaps to stock raw iron and, in a separate run, a registered material row. Both runs covered two native detail levels and preserved density and packed colour. The registered-material run verified 79 solid samples inside the band and 453 outside it. The lab used diagnostic buffer submission. The normal camera submission path and saved terrain reload require separate checks.
