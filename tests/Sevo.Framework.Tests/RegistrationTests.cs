@@ -41,6 +41,59 @@ internal static class RegistrationTests
         diskCatalog.Register("example.alpha","a",1,id=>{invoked=true;return diskRegistry.Values[id]=new Block(id);});
         Reject(()=>new NativeRegistrationSession(diskRegistry).Commit(diskCatalog.Seal(),Allocator(),_=>throw new InvalidOperationException("disk failed")));
         Check(!invoked);
+        checks += VerifyMixedRegistrationAndReload();
         return checks;
+    }
+
+    private static int VerifyMixedRegistrationAndReload()
+    {
+        const int fixedId = 2;
+        const int managedId = 3;
+        const string owner = "example.saved-blocks";
+        var legacyBlock = new Block(fixedId);
+        var first = new Registry();
+        first.Values[fixedId] = legacyBlock;
+        var initial = new RegistrationCatalog();
+        initial.Register(owner, "block", 1, id => first.Values[id] = new Block(id));
+        string saved = "";
+        new NativeRegistrationSession(first).Commit(initial.Seal(),
+            new ContentAllocator(first.Capacity, new[] { 0, 1 }, new[] { fixedId }), json => saved = json);
+        if (first.Values[managedId] is not Block || !ReferenceEquals(first.Values[fixedId], legacyBlock))
+            throw new Exception("Managed allocation must skip an occupied legacy slot.");
+
+        var occupied = new Registry();
+        occupied.Values[managedId] = new Block(managedId);
+        var conflict = new NativeRegistrationSession(occupied);
+        bool persisted = false;
+        try
+        {
+            conflict.Commit(Array.Empty<ContentDefinition>(), ContentAllocator.FromJson(saved, occupied.Capacity,
+                new[] { 0, 1 }, new[] { managedId }), _ => persisted = true);
+        }
+        catch (InvalidOperationException error) when (error.InnerException?.Message.Contains(owner + ":block") == true) { }
+        if (!conflict.Failed || persisted)
+            throw new Exception("A missing managed owner must still reject a legacy occupant before persisting.");
+
+        var reload = new Registry();
+        var session = new NativeRegistrationSession(reload);
+        session.Commit(Array.Empty<ContentDefinition>(),
+            ContentAllocator.FromJson(saved, reload.Capacity, new[] { 0, 1 }, Array.Empty<int>()),
+            json => saved = json);
+        var restored = new Registry();
+        var restoredCatalog = new RegistrationCatalog();
+        restoredCatalog.Register(owner, "block", 1, id => restored.Values[id] = new Block(id));
+        new NativeRegistrationSession(restored).Commit(restoredCatalog.Seal(),
+            ContentAllocator.FromJson(saved, restored.Capacity, new[] { 0, 1 }, Array.Empty<int>()), _ => { });
+        if (restored.Values[managedId] is not Block)
+            throw new Exception("Reloading the original owner must restore its saved numeric ID.");
+
+        reload.Values[fixedId] = legacyBlock;
+        session.VerifyOwnership();
+        reload.Values[managedId] = new Block(managedId);
+        try { session.VerifyOwnership(); }
+        catch (InvalidOperationException error) when (error.Message.Contains(owner + ":block")) { }
+        if (!session.Failed)
+            throw new Exception("Ownership verification must reject a late write to an inactive managed ID.");
+        return 4;
     }
 }

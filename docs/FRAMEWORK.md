@@ -43,6 +43,10 @@ The allocator preserves existing assignments, sorts new keys deterministically, 
 
 Native registration reserves and persists the whole mapping before executing factories. The factory must return the exact supported native object published in the assigned slot. Ownership is checked around resource callbacks and reloads. Partial native mutation fails that content session permanently and requires restart; clearing one registry entry is not a reliable native rollback.
 
+An inactive managed brick's reserved slot must remain empty. Keel checks it during admission and rechecks it with active managed slots during the resource lifecycle. If another definition occupies a reserved slot, the managed content session fails and reports the saved key and numeric ID. This protects the saved identity of any managed brick, including a removed decorative palette or an optional command block.
+
+For new content, declare namespaced keys from the dependent plugin's `Awake` and let Keel allocate IDs. Fixed IDs from legacy plugins may already be present when Keel samples the native table. Package manifests should declare every fixed brick and collision shape ID so Uplink can reject declared overlaps before plugin load. A claim describes package requirements. Existing saves require separate evidence linking a saved numeric ID to its original definition. If two historical definitions used the same ID, a mod must resolve the source before migrating that save or blueprint. Keel cannot attribute an arbitrary write to the game's shared tables to a package or safely unload an already-running plugin.
+
 Numeric capacity is bounded by the live registry, packed ID representation and relevant native ID-indexed buffers. The preview reserves0 and conservatively1;1 is a policy exclusion pending its full semantics. No recorded list of346 vanilla definitions is used as an allocation allowlist. Future vanilla occupation of a persisted ID is an actual conflict to handle, not permission to move saved identities silently.
 
 ## Profile and launch protocol

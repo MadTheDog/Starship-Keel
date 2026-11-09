@@ -214,6 +214,7 @@ namespace Sevo.Framework.Runtime
     {
         private readonly INativeRegistry registry;
         private readonly Dictionary<int,object> owned = new Dictionary<int,object>();
+        private Mapping[] inactiveReservations = Array.Empty<Mapping>();
         private bool attempted;
         public bool Failed { get; private set; }
         public IReadOnlyDictionary<int,object> Owned => new ReadOnlyDictionary<int,object>(owned);
@@ -228,8 +229,12 @@ namespace Sevo.Framework.Runtime
                 var ids=allocator.Apply(definitions.Select(definition=>new ContentRequest(definition.Key,ResourceKind.Brick,definition.Revision)));
                 foreach(var id in ids.Values)
                     if(id<0 || id>=registry.Capacity || registry.Read(id)!=null) throw new InvalidOperationException("Reserved native slot became occupied: "+id);
+                var snapshot=allocator.ToJson();
+                inactiveReservations=RegistryJson.Read(snapshot).Mappings
+                    .Where(mapping=>mapping.Kind==ResourceKind.Brick && mapping.Tombstone).ToArray();
+                VerifyInactiveReservations();
                 // Persist before any constructor can publish an ID into the native table.
-                persistRegistry(allocator.ToJson());
+                persistRegistry(snapshot);
                 foreach(var definition in definitions)
                 {
                     int id=ids[definition.Key];
@@ -260,11 +265,19 @@ namespace Sevo.Framework.Runtime
             if(Failed) throw new InvalidOperationException("Content session already failed; restart required.");
             try
             {
+                VerifyInactiveReservations();
                 foreach(var pair in owned)
                     if(pair.Key>=registry.Capacity || !ReferenceEquals(registry.Read(pair.Key),pair.Value))
                         throw new InvalidOperationException("Managed native ID was overwritten: "+pair.Key);
             }
             catch { Failed=true; throw; }
+        }
+
+        private void VerifyInactiveReservations()
+        {
+            foreach(var mapping in inactiveReservations)
+                if(mapping.Id>=registry.Capacity || registry.Read(mapping.Id)!=null)
+                    throw new InvalidOperationException("Inactive managed brick ID is unavailable: "+mapping.Key+" ("+mapping.Id+")");
         }
     }
 }

@@ -18,6 +18,7 @@
 - Added an opt-in read-only observer for authoritative gameplay grid destruction.
 - Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
 - Added an opt-in sublight input lease for the local player's last piloted ship after stock exit completes.
+- Detect native definitions occupying inactive managed brick IDs during admission and resource checks.
 - Added a separate HoverRail guide sample and geometry checks.
 - Added opt-in planet and moon material bands relative to the native nominal body radius.
 - Added read-only galaxy catalog checks for installed asset references, loaded aliases, and selected save identity.
