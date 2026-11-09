@@ -105,6 +105,8 @@ public sealed class Probe : BaseUnityPlugin
         var flush = FindDefinition(FlushName);
         CheckCollider(corner);
         CheckCollider(flush);
+        Require(flush.NoMirroring && corner.NoMirroring == TabStorage.PIPE_ANGLED.NoMirroring,
+            "The flush reflection guard changed the ordinary connector or failed to opt out.");
         var sleeve = FindDefinition(SleeveName);
         CheckCollider(sleeve);
         Require(sleeve.GetItemStorageType(null!, 0) == ItemStorageType.none,
@@ -155,6 +157,7 @@ public sealed class Probe : BaseUnityPlugin
             yield return null;
         }
         Record("corner-ray", $"ordinary stock ray selected exact corner fitting {exact.brickData.instanceId}");
+        float fittingCorrection = CapsuleCorrection(liveNormal);
         bool duplicate = Overlaps(normal);
         bool occupied = Overlaps(solid);
         Record("overlap-result", $"duplicate={duplicate};cargoOverFitting={occupied}");
@@ -170,6 +173,13 @@ public sealed class Probe : BaseUnityPlugin
         Edit(solid, VoxelActionType.build);
         deadline = Time.realtimeSinceStartup + 12f;
         while (Waiting(() => Find(solid).HasValue, deadline, "stock solid")) yield return null;
+        float solidCorrection = CapsuleCorrection(liveNormal);
+        float capsuleDeadline = Time.realtimeSinceStartup + 8f;
+        while (Waiting(() => (solidCorrection = CapsuleCorrection(liveNormal)) > 0.02f, capsuleDeadline,
+            "native capsule contact against stock cargo control")) yield return null;
+        Require(fittingCorrection < 0.002f, "The stock character capsule registered contact with the pass-through fitting.");
+        Record("native-capsule", FormattableString.Invariant(
+            $"fittingCorrection={fittingCorrection:F4};cargoCorrection={solidCorrection:F4}"));
         Require(Overlaps(normal), "Native placement allowed the fitting through an existing solid.");
         Record("reverse-rejected", "stock overlap query rejected fitting over live solid");
 
@@ -305,6 +315,17 @@ public sealed class Probe : BaseUnityPlugin
         var data = grid.Bricks.GetBrickData(grid.Bricks.GetBrickInstanceId(expected));
         return data.IsValid && data.brickId == expected.brickId && data.gridPosition == expected.gridPosition
             && data.gridLevel == expected.gridLevel && data.rotation == expected.rotation ? new BrickCoord(grid.ID, data) : null;
+    }
+
+    private float CapsuleCorrection(BrickCoord target)
+    {
+        var bounds = target.brickData.GetAabb(useGeoBounds: true);
+        Vector3 localCenter = ((Vector3)bounds.Min + (Vector3)bounds.Max) * 0.5f;
+        var transform = grid!.TransformData;
+        var center = transform.LocalToWorld(localCenter);
+        var axis = 0.5f * (transform.rotation * Vector3.up);
+        var gravity = Dependency.PlayerManager.PlayerRigidbody.GravityForce;
+        return VoxelPhysics.OffsetCapsuleMove(Vector3.zero, center, 0.35f, axis, gravity, SkyPhysics.CONTEXT).magnitude;
     }
 
     private bool Overlaps(BrickInstanceData data)

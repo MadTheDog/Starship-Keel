@@ -31,6 +31,7 @@
 - Verified a bounded stock terrain survey reproduced its canonical density after restart and applied depth bands across two terrain detail levels.
 - Verified native terrain atlas replacement at GPU mips 0 and 4. The separate starter-planet color bake retained identical coarse face textures.
 - Verified that a flush cargo fitting and its bidirectional routes survived stock character reload, then transferred items after reopening.
+- Verified that the native movement capsule passes through a selectable fitting and is stopped by a solid cargo control. The separate cargo inventories and their item routes survived a fresh-process reload.
 - Verified live Arc Furnace module changes against stock progress. The opt-in module doubled the rate, removal restored the stock rate, and both batches completed with the expected output.
 - Verified a clear custom seat exit, stock fallback for an obstructed exit, and unchanged exit behavior on an unrelated seat.
 - Verified seated foot targets reach the native Animator alongside stock yoke hand targets and clear on exit.
