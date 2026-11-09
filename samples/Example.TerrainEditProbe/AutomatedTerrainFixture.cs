@@ -84,9 +84,11 @@ namespace Sevo.Example.TerrainEditProbe
             if (!autoArmed || Time.realtimeSinceStartup < nextAttempt || !TerrainEditService.IsAvailable
                 || !GameloopManager.IsMainThread || GameloopManager.IsNativeContainerAccessUnsafe
                 || PlayerState.InLoadingScreen || PlayerState.IsQuittingToDesktopOrTitle
+                || PlayerState.SystemEntered || PlayerState.InMenu
                 || PlayerState.sessionMode != PlayerState.SessionMode.solo || PlayerState.gameMode != PlayerState.GameMode.creative
                 || !NetworkServer.active || !NetworkServer.dontListen || GameIntroductionResources.instance?.Medbay?.inAnimation != false
-                || Dependency.PlayerManager == null || !Dependency.PlayerManager.isLocalPlayer)
+                || Dependency.PlayerManager == null || !Dependency.PlayerManager.isLocalPlayer
+                || Dependency.PlayerManager.Health.IsRespawning)
                 return;
 
             try
