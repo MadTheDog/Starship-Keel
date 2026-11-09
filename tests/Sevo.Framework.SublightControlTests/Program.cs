@@ -69,4 +69,36 @@ BreakPreparedContract("Spaceship", "set_ComputerSpaceship", item => item.OpCode.
 BreakPreparedContract("VoxelEngine.ComputerBaseVehicle", "OnPredecessorAdded",
     item => item.Operand is MethodReference target && target.Name == "set_inputOrientation");
 
+var unpilotedAudit = typeof(ContractAudit).GetMethod("EvaluateUnpilotedSublightControl")
+    ?? throw new Exception("Missing unpiloted sublight control audit.");
+CapabilityResult Unpiloted() => (CapabilityResult)unpilotedAudit.Invoke(null, new object[] { module })!;
+Check(Unpiloted().Available, "The stock unpiloted flight path must admit the capability. " + Unpiloted().Reason);
+module.Mvid = Guid.NewGuid();
+try { Check(Unpiloted().Available, "Unpiloted flight must not depend on assembly identity."); }
+finally { module.Mvid = originalMvid; }
+
+void BreakUnpilotedContract(string type, string method, Func<Instruction, bool> match)
+{
+    var instruction = module.GetType(type).Methods.Where(item => item.Name == method && item.HasBody)
+        .SelectMany(item => item.Body.Instructions).Single(match);
+    var original = instruction.OpCode;
+    instruction.OpCode = OpCodes.Nop;
+    try
+    {
+        Check(Available() && PreparedAvailable(), "Unpiloted-only changes must preserve the existing leases.");
+        Check(!Unpiloted().Available, $"Changed {type}.{method} must reject the unpiloted lease.");
+    }
+    finally { instruction.OpCode = original; }
+}
+BreakUnpilotedContract("SpaceshipDrive", ".ctor", item => item.OpCode.Code == Code.Stfld
+    && item.Operand is FieldReference field && field.Name == "skyRigidbody");
+BreakUnpilotedContract("SpaceshipDrive", "ComputeAndApplyForce", item => item.OpCode.Code == Code.Ldfld
+    && item.Operand is FieldReference field && field.Name == "q");
+BreakUnpilotedContract("SpaceshipDrive", "ComputeAndApplyTorque", item => item.OpCode.Code == Code.Brfalse_S
+    && item.Previous?.Operand is MethodReference method && method.Name == "get_IsControlledByLocalPlayer");
+BreakUnpilotedContract("VoxelEngine.EntitySystems", "ComputeThrust", item => item.OpCode.Code == Code.Brfalse_S
+    && item.Previous?.OpCode.Code == Code.Ldarg_3);
+BreakUnpilotedContract("VoxelEngine.EntitySystems", "set_ThrustForward", item => item.OpCode.Code == Code.Stfld);
+BreakUnpilotedContract("BaseVehicle", "set_Orientation", item => item.OpCode.Code == Code.Stfld);
+
 Console.WriteLine("Sublight control policy and native contract checks passed.");

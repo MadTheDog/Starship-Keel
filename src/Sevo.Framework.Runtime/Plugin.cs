@@ -102,6 +102,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult gridPhysics;
                 CapabilityResult sublightControl;
                 CapabilityResult preparedSublightControl;
+                CapabilityResult unpilotedSublightControl;
                 CapabilityResult cameraView;
                 CapabilityResult mechanismPaths;
                 CapabilityResult gridAttachments;
@@ -172,6 +173,7 @@ namespace Sevo.Framework.Runtime
                     gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
                     sublightControl = ContractAudit.EvaluateSublightControl(metadata.MainModule);
                     preparedSublightControl = ContractAudit.EvaluatePreparedSublightControl(metadata.MainModule);
+                    unpilotedSublightControl = ContractAudit.EvaluateUnpilotedSublightControl(metadata.MainModule);
                     cameraView = ContractAudit.EvaluateCameraView(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
                     gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
@@ -439,11 +441,15 @@ namespace Sevo.Framework.Runtime
                     sublightControl = new CapabilityResult(sublightControl.Name, false, "Requires the grid physics hook.");
                 sublightControl = InstallContentHook(sublightControl, "EnableSublightControl", "SUBLIGHT_CONTROL", () =>
                 {
-                    SublightControlService.Enable(message => Logger.LogWarning(message), preparedSublightControl.Available);
+                    SublightControlService.Enable(message => Logger.LogWarning(message), preparedSublightControl.Available,
+                        unpilotedSublightControl.Available);
                     return sublightControl;
                 }, SublightControlService.Disable);
                 if (preparedSublightControl.Available && !sublightControl.Available)
                     preparedSublightControl = new CapabilityResult(preparedSublightControl.Name, false, "Requires the sublight control hook.");
+                if (unpilotedSublightControl.Available && !SublightControlService.UnpilotedShipsAvailable)
+                    unpilotedSublightControl = new CapabilityResult(unpilotedSublightControl.Name, false,
+                        sublightControl.Available ? "The live unpiloted drive binding failed." : "Requires the sublight control hook.");
                 cameraView = InstallContentHook(cameraView, "EnableCameraView", "CAMERA_VIEW",
                     () => InstallContentHookPatches(cameraView, CameraViewService.Install, CameraViewService.Disable));
                 mechanismPaths = InstallContentHook(mechanismPaths, "EnableMechanismPaths", "MECHANISM_PATHS",
@@ -495,7 +501,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

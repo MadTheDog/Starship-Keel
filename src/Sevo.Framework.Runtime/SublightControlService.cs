@@ -12,24 +12,29 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
+    internal enum SublightControlMode { LastPiloted, Prepared, Unpiloted }
+
     /// <summary>One expiring analog input source for a locally owned, unoccupied stock spaceship.</summary>
     public sealed class SublightControlLease : IDisposable
     {
         internal readonly ParentEntity Grid;
         internal readonly string Owner;
-        internal readonly bool PreparedShip;
+        internal readonly SublightControlMode Mode;
+        internal readonly UnpilotedSublightDrive? UnpilotedDrive;
         internal double ExpiresAt;
         internal Vector3 Translation;
         internal Vector3 Rotation;
         internal bool HasInput;
         private int disposed;
 
-        internal SublightControlLease(ParentEntity grid, string owner, double expiry, bool preparedShip)
+        internal SublightControlLease(ParentEntity grid, string owner, double expiry,
+            SublightControlMode mode, UnpilotedSublightDrive? unpilotedDrive)
         {
             Grid = grid;
             Owner = owner;
             ExpiresAt = expiry;
-            PreparedShip = preparedShip;
+            Mode = mode;
+            UnpilotedDrive = unpilotedDrive;
         }
 
         /// <summary>Refreshes native control axes in [-1, 1] on the game thread.</summary>
@@ -44,7 +49,7 @@ namespace Sevo.Framework.Runtime
     public static class SublightControlService
     {
         private const double InputLifetime = 0.35;
-        private const float PreparedShipRange = 250f;
+        private const float RemoteShipRange = 250f;
         private static AccessTools.StructFieldRef<SkyRigidbody.Data, bool>? authority;
         private static AccessTools.StructFieldRef<SkyRigidbody.Data, bool>? kinematic;
         private static FieldInfo? postExitCommands;
@@ -53,31 +58,39 @@ namespace Sevo.Framework.Runtime
         private static SublightControlLease? active;
         private static bool registered;
         private static bool preparedShipsEnabled;
+        private static bool unpilotedShipsEnabled;
 
         public static bool IsAvailable => warn != null && GridPhysicsStep.IsAvailable;
         public static bool PreparedShipsAvailable => IsAvailable && preparedShipsEnabled;
+        public static bool UnpilotedShipsAvailable => IsAvailable && unpilotedShipsEnabled;
 
         /// <summary>Acquires the local player's last piloted ship after its stock exit routine ends.</summary>
         public static bool TryAcquire(string ownerId, ParentEntity grid, out SublightControlLease? lease)
-            => TryAcquireCore(ownerId, grid, false, out lease);
+            => TryAcquireCore(ownerId, grid, SublightControlMode.LastPiloted, out lease);
 
         /// <summary>Acquires a nearby owned ship whose stock flight controls remain initialized after piloting.</summary>
         public static bool TryAcquirePreparedShip(string ownerId, ParentEntity grid, out SublightControlLease? lease)
-            => TryAcquireCore(ownerId, grid, true, out lease);
+            => TryAcquireCore(ownerId, grid, SublightControlMode.Prepared, out lease);
 
-        private static bool TryAcquireCore(string ownerId, ParentEntity grid, bool preparedShip, out SublightControlLease? lease)
+        /// <summary>Acquires nearby owned stock flight controls without prior piloting.</summary>
+        public static bool TryAcquireUnpilotedShip(string ownerId, ParentEntity grid, out SublightControlLease? lease)
+            => TryAcquireCore(ownerId, grid, SublightControlMode.Unpiloted, out lease);
+
+        private static bool TryAcquireCore(string ownerId, ParentEntity grid, SublightControlMode mode, out SublightControlLease? lease)
         {
             lease = null;
             if (!Safe() || (active is { Disposed: false } current && current.ExpiresAt > Time.unscaledTimeAsDouble)
-                || !TryResolveDrive(grid, preparedShip, out _))
+                || !TryResolveShip(grid, mode, out var ship, out var core))
                 return false;
             ContentAllocator.ValidateKey(ownerId + ":sublight");
+            var unpilotedDrive = mode == SublightControlMode.Unpiloted
+                ? new UnpilotedSublightDrive(ship!, grid.Rigidbody, core!) : null;
             active?.Dispose();
-            active = lease = new SublightControlLease(grid, ownerId, Time.unscaledTimeAsDouble + InputLifetime, preparedShip);
+            active = lease = new SublightControlLease(grid, ownerId, Time.unscaledTimeAsDouble + InputLifetime, mode, unpilotedDrive);
             return true;
         }
 
-        internal static void Enable(Action<string> log, bool enablePreparedShips)
+        internal static void Enable(Action<string> log, bool enablePreparedShips, bool enableUnpilotedShips = false)
         {
             if (!GridPhysicsStep.IsAvailable) throw new InvalidOperationException("Grid physics is unavailable.");
             postExitCommands = typeof(NetworkedCommandActivator).GetField("commandPostExit", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -93,6 +106,7 @@ namespace Sevo.Framework.Runtime
             }
             warn = log;
             preparedShipsEnabled = enablePreparedShips;
+            unpilotedShipsEnabled = enableUnpilotedShips && UnpilotedSublightDrive.TryBind(log);
         }
 
         internal static void Disable()
@@ -100,6 +114,7 @@ namespace Sevo.Framework.Runtime
             active?.Dispose();
             active = null;
             preparedShipsEnabled = false;
+            unpilotedShipsEnabled = false;
             warn = null;
         }
 
@@ -128,14 +143,22 @@ namespace Sevo.Framework.Runtime
             try
             {
                 if (lease.Disposed || lease.ExpiresAt <= Time.unscaledTimeAsDouble || !GridPhysicsStep.CanApply(context)
-                    || !TryResolveDrive(lease.Grid, lease.PreparedShip, out var drive))
+                    || !TryResolveShip(lease.Grid, lease.Mode, out var ship, out var core))
                 {
                     EndLease(lease);
                     return;
                 }
 
                 if (!lease.HasInput) return;
-                drive!.UpdateShipTransform(new VehicleControlInput { translation = lease.Translation, orient = lease.Rotation });
+                if (lease.UnpilotedDrive is { } unpiloted)
+                {
+                    if (!unpiloted.TryApply(ship!, core!, lease.Translation, lease.Rotation))
+                    {
+                        EndLease(lease);
+                        return;
+                    }
+                }
+                else ship!.Drive.UpdateShipTransform(new VehicleControlInput { translation = lease.Translation, orient = lease.Rotation });
                 GridPhysicsStep.ConsumeForce();
             }
             catch (Exception exception)
@@ -151,13 +174,15 @@ namespace Sevo.Framework.Runtime
             if (ReferenceEquals(active, lease)) active = null;
         }
 
-        private static bool TryResolveDrive(ParentEntity grid, bool preparedShip, out SpaceshipDrive? drive)
+        private static bool TryResolveShip(ParentEntity grid, SublightControlMode mode, out Spaceship? ship, out ComputerSpaceship? core)
         {
-            drive = null;
+            ship = null;
+            core = null;
+            bool remote = mode != SublightControlMode.LastPiloted;
             var player = Dependency.PlayerManager;
             var network = Dependency.PlayerNetwork;
             if (grid == null || player == null || !player.IsLocal || network == null || network.netId == 0
-                || (!preparedShip && !ReferenceEquals(player.LastSpaceship, grid))
+                || (!remote && !ReferenceEquals(player.LastSpaceship, grid))
                 || !grid.IsInitialized || grid.WillBeUnspawned || grid.isDestroyed
                 || grid.Type != EntityType.spaceship || string.IsNullOrEmpty(grid.SGUID) || BlockEntityManager.instance == null
                 || !ReferenceEquals(BlockEntityManager.instance.GetEntityBySGUID(grid.SGUID), grid)
@@ -178,17 +203,27 @@ namespace Sevo.Framework.Runtime
                 || authority == null || !authority(ref data) || kinematic == null || kinematic(ref data))
                 return false;
 
-            var ship = grid.GetComponent<Spaceship>();
-            if (ship == null || ship.IsControlled || ship.CommandManager != null || ship.aiController != null
+            ship = grid.GetComponent<Spaceship>();
+            if (ship == null || !ReferenceEquals(ship.entity, grid) || ship.IsControlled || ship.CommandManager != null || ship.aiController != null
                 || ship.autoPilot == null || ship.autoPilot.autopilotEngaged
-                || ship.Drive == null || ship.Drive.Mode != SpaceshipDrive.DriveMode.standard
-                || ship.computerBaseVehicle is not ComputerSpaceship core || core.IsRemoved)
+                || ship.Drive == null || ship.Drive.Mode != SpaceshipDrive.DriveMode.standard)
+                return false;
+
+            if (mode == SublightControlMode.Unpiloted)
+            {
+                if (!UnpilotedShipsAvailable || ship.computerBaseVehicle != null || ship.ComputerSpaceship != null
+                    || ship.spaceshipCores.Count != 1)
+                    return false;
+                core = ship.spaceshipCores[0];
+            }
+            else core = ship.computerBaseVehicle as ComputerSpaceship;
+            if (core == null || core.IsRemoved)
                 return false;
             var coord = core.brickCoord;
             if (!ReferenceEquals(coord.Parent, grid) || !ReferenceEquals(coord.Command, core) || coord.brickData.HealthFactor <= 0f
-                || !ValidOrientation(ship.Orientation))
+                || (mode != SublightControlMode.Unpiloted && !ValidOrientation(ship.Orientation)))
                 return false;
-            if (preparedShip && !HasPreparedControls(player, grid, ship, core)) return false;
+            if (remote && !HasRemoteControls(player, grid, ship, core, mode)) return false;
 
             bool localPlayerRegistered = false;
             foreach (var controller in PlayerCommandManager.AllPlayers)
@@ -202,32 +237,34 @@ namespace Sevo.Framework.Runtime
                 if (ReferenceEquals(controller, player))
                 {
                     localPlayerRegistered = true;
-                    if (preparedShip && (enters.Count != 0 || exits.Count != 0)) return false;
+                    if (remote && (enters.Count != 0 || exits.Count != 0)) return false;
                 }
                 foreach (var command in exits)
                     if (command != null && ReferenceEquals(command.brickCoord.Parent, grid)) return false;
                 foreach (var entry in enters)
                     if (ReferenceEquals(entry.Parent, grid)) return false;
             }
-            if (!localPlayerRegistered) return false;
-
-            drive = ship.Drive;
-            return true;
+            return localPlayerRegistered;
         }
 
-        private static bool HasPreparedControls(PlayerCommandManager player, ParentEntity grid, Spaceship ship, ComputerSpaceship core)
+        private static bool HasRemoteControls(PlayerCommandManager player, ParentEntity grid, Spaceship ship,
+            ComputerSpaceship core, SublightControlMode mode)
         {
-            if (!PreparedShipsAvailable || PlayerState.IsControllingVehicle || PlayerState.SystemEntered
+            if (PlayerState.IsControllingVehicle || PlayerState.SystemEntered
                 || player.IsSeated || player.IsExitingSeat || player.CommandActivator == null || player.CommandActivator.IsInEnterCommand
                 || !grid.SkyTransform.CurrentSystem.Equals(player.SkyTransform.CurrentSystem)
-                || !ReferenceEquals(ship.ComputerSpaceship, core) || core.CommandYoke is not { IsRemoved: false } yoke)
+                || core.CommandYoke is not { IsRemoved: false } yoke)
                 return false;
             var yokeCoord = yoke.brickCoord;
             var offset = (grid.TransformData.systemPosition - player.TransformData.systemPosition).ToVector3();
-            return offset.sqrMagnitude <= PreparedShipRange * PreparedShipRange
-                && ReferenceEquals(yokeCoord.Parent, grid) && ReferenceEquals(yokeCoord.Command, yoke)
-                && yokeCoord.brickData.HealthFactor > 0f && ValidOrientation(core.inputOrientation)
-                && Mathf.Abs(Quaternion.Dot(ship.Orientation, core.inputOrientation)) >= 0.999f;
+            if (!(offset.sqrMagnitude <= RemoteShipRange * RemoteShipRange) || !ReferenceEquals(yokeCoord.Parent, grid)
+                || !ReferenceEquals(yokeCoord.Command, yoke) || yokeCoord.brickData.HealthFactor <= 0f
+                || !ValidOrientation(core.inputOrientation))
+                return false;
+            return mode == SublightControlMode.Prepared
+                ? PreparedShipsAvailable && ReferenceEquals(ship.ComputerSpaceship, core)
+                    && Mathf.Abs(Quaternion.Dot(ship.Orientation, core.inputOrientation)) >= 0.999f
+                : Mathf.Abs(Quaternion.Dot(yokeCoord.brickData.Quaternion, core.inputOrientation)) >= 0.999f;
         }
 
         private static bool ValidOrientation(Quaternion orientation)

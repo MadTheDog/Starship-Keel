@@ -20,6 +20,7 @@
 - Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
 - Added an opt-in sublight input lease for the local player's last piloted ship after stock exit completes.
 - Added a separate acquisition method for earlier piloted, locally owned ships within 250 m that retain their native flight controls. A two-ship fixture verified native movement on the earlier ship while it remained unoccupied.
+- Added an opt-in sublight lease for nearby powered ships whose stock flight controls have never been initialized by a pilot. Mods provide the input. Keel applies native force and torque without occupying the seat.
 - Added an opt-in local camera-follow lease for a loaded grid, with stock action suppression until the ordinary view returns.
 - Detect native definitions occupying inactive managed brick IDs during admission and resource checks.
 - Added a separate HoverRail guide sample and geometry checks.
