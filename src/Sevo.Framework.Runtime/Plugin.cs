@@ -12,7 +12,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.10")]
+    [BepInPlugin(Id,"Starship Keel","0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -93,6 +93,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult inventoryViews;
                 CapabilityResult worldSurfaceQuery;
                 CapabilityResult gridRecovery;
+                CapabilityResult wreckClaim;
                 CapabilityResult terrainEdits;
                 CapabilityResult seatedPoseTargets;
                 CapabilityResult dismountPoses;
@@ -164,6 +165,7 @@ namespace Sevo.Framework.Runtime
                     inventoryViews = ContractAudit.EvaluateInventoryViews(metadata.MainModule);
                     worldSurfaceQuery = ContractAudit.EvaluateWorldSurfaceQuery(metadata.MainModule);
                     gridRecovery = ContractAudit.EvaluateGridRecovery(metadata.MainModule);
+                    wreckClaim = ContractAudit.EvaluateWreckClaim(metadata.MainModule);
                     terrainEdits = ContractAudit.EvaluateTerrainEdits(metadata.MainModule);
                     seatedPoseTargets = ContractAudit.EvaluateSeatedPoseTargets(metadata.MainModule);
                     dismountPoses = ContractAudit.EvaluateDismountPoses(metadata.MainModule);
@@ -493,7 +495,12 @@ namespace Sevo.Framework.Runtime
                         GridRecoveryService.Enable();
                         return gridRecovery;
                     }, GridRecoveryService.Disable);
-                if (!experimental && (cameraView.Available || vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || gridDestruction.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
+                wreckClaim = InstallContentHook(wreckClaim, "EnableWreckClaim", "WRECK_CLAIM", () =>
+                {
+                    WreckClaimService.Enable(profile!, message => Logger.LogWarning(message));
+                    return wreckClaim;
+                }, WreckClaimService.Disable);
+                if (!experimental && (wreckClaim.Available || cameraView.Available || vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || gridDestruction.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
                     || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || galaxyCatalogPublication.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
@@ -501,7 +508,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, wreckClaim, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -957,6 +964,7 @@ namespace Sevo.Framework.Runtime
         private void Update()
         {
             if(KeelFunctionalCommand.Enabled) KeelFunctionalCommand.StopOutsideSolo();
+            WreckClaimService.Tick();
             // Wait until the resource loader returns to the player loop. JIT-compiling native interaction
             // methods can initialize UI and crafting types that require fully allocated game resources.
             if(awaitingAttachmentInteraction && pendingAttachmentGame!=null && pendingAttachmentCapability!=null)

@@ -10,7 +10,7 @@ using World;
 namespace Sevo.Example.TerrainMaterialProbe
 {
     [BepInPlugin(Id, "Keel Terrain Material Probe", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private const string Id = "example.terrainmaterial";

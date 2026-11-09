@@ -4,7 +4,7 @@ The preview probe compiles a stock subset and an authored candidate without chan
 
 ## Disposable publication and reload
 
-Build this sample against the Keel 0.1.10 candidate. Run it in the verified Keel generation lab on Steam build 26451593 / 26w45a with BepInEx 5.4.23.5. The publication probe checks the lab's Unity company and product names and its managed profile before using stock character UI.
+Build this sample against the Keel 0.2.0 candidate. Run it in the verified Keel generation lab on Steam build 26451593 / 26w45a with BepInEx 5.4.23.5. The publication probe checks the lab's Unity company and product names and its managed profile before using stock character UI.
 
 Give the launcher a fresh managed state directory. In it, create an empty `galaxy-characters` directory and give it one file named `sevo-galaxy-save-root.json`. Use schema version 1 and the same profile ID as the state's `sevo-runtime-profile.json`. Set `stateDirectory` to the absolute managed state path and `nativeSaveRoot` to the absolute `galaxy-characters` path. The sample redirects the native character path to this root only in its disposable process and reapplies the redirect after stock path initialization.
 

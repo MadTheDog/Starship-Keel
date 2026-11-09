@@ -16,14 +16,14 @@ using World;
 namespace Sevo.Example.WreckClaimProbe;
 
 [BepInPlugin("example.keel.wreck-claim", "Keel Wreck Claim Probe", "0.1.0")]
-[BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+[BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
 public sealed class Probe : BaseUnityPlugin
 {
     private const string Prefix = "KEEL_WRECK_CLAIM_PROBE";
     private const string Env = "SEVO_KEEL_WRECK_CLAIM_PROBE";
     private const string BlueprintName = "V27 Hotwing";
     private const string WreckName = "Keel Wreck Claim Fixture";
-    private enum Step { Off, CreateSource, DefeatSource, Stage, AwaitRetirement, Recover, AwaitReplacement, Reload }
+    private enum Step { Off, CreateSource, DefeatSource, Stage, AwaitRetirement, Recover, AwaitReplacement, AwaitPublicClaim, Reload }
     private readonly Stopwatch deadline = new Stopwatch();
     private Step step;
     private ProfileSession profile = null!;
@@ -45,6 +45,8 @@ public sealed class Probe : BaseUnityPlugin
     private WreckRecoverySnapshot? snapshot;
     private bool interruptAfterRetirement;
     private bool stagedSurvivalPosition;
+    private bool publicClaim;
+    private WreckClaimOperation? claim;
 
     private void Awake()
     {
@@ -60,6 +62,8 @@ public sealed class Probe : BaseUnityPlugin
             if (gameMode.Length == 0) gameMode = "creative";
             Require(gameMode is "creative" or "survival", "Use Creative or Survival for the disposable fixture.");
             interruptAfterRetirement = mode == "stage" && Read(Env + "_INTERRUPT") == "1";
+            publicClaim = Read(Env + "_API") == "1";
+            Require(!publicClaim || WreckClaimService.IsAvailable, "Enable the audited wreck claim capability.");
             var game = Read(Env + "_GAME");
             var company = Read(Env + "_COMPANY");
             var product = Read(Env + "_PRODUCT");
@@ -90,12 +94,18 @@ public sealed class Probe : BaseUnityPlugin
             metadataPath = Path.Combine(root, "fixture.xml");
             snapshotPath = Path.Combine(root, "snapshot.json");
             receiptPath = Path.Combine(root, "saved.txt");
-            if (mode == "recover") ReadSnapshot();
-            if (mode == "reload")
+            if (mode == "recover" && !publicClaim) ReadSnapshot();
+            if (mode == "reload" || mode == "recover" && publicClaim)
             {
                 var receipt = ReadReceipt();
                 star.seed = receipt.Star;
                 identity = receipt.Identity;
+            }
+            if (mode == "recover" && publicClaim)
+            {
+                var pending = PublicPendingDirectory();
+                RejectReparse(pending, Path.GetFullPath(Application.persistentDataPath));
+                Require(File.Exists(Path.Combine(pending, "claim.bin")), "The API claim finished before the test interruption.");
             }
             Next(mode == "stage" ? Step.CreateSource : mode == "recover" ? Step.Recover : Step.Reload);
         }
@@ -127,12 +137,32 @@ public sealed class Probe : BaseUnityPlugin
                 if (source == null || !source.IsInitialized || source.BrickCount.totalBricks == 0) return;
                 Require(SourceIsEligible(), "The probe source is not the exact ordinary transient NPC fixture.");
                 Require(!source.isDestroyed, "The source was defeated before stock destruction.");
+                if (publicClaim)
+                    Require(!WreckClaimService.TryClaimTransientWreck(source, out _), "The public hook admitted a live NPC ship.");
                 Dependency.PlayerManager.NetworkSetup.ServerDestroyEntity(source);
                 Next(Step.Stage);
                 break;
             case Step.Stage:
                 if (source == null || !source.isDestroyed) return;
                 Require(SourceIsEligible(), "The probe source changed before staging.");
+                if (publicClaim)
+                {
+                    SaveManager.SaveOnSceneQuit();
+                    Require(WreckClaimService.TryClaimTransientWreck(source, out claim) && claim?.PersistentId == identity,
+                        "The public claim hook rejected the eligible wreck.");
+                    Require(!WreckClaimService.TryClaimTransientWreck(source, out _), "The public hook admitted a duplicate claim.");
+                    if (interruptAfterRetirement)
+                    {
+                        Require(claim!.State == WreckClaimState.Pending && ReadNativeIndexCount() == 0,
+                            "The public claim already committed before the interruption.");
+                        WriteReceipt();
+                        Report("INTERRUPTED_PASS accepted public claim with a durable journal and zero stock save entries");
+                        step = Step.Off;
+                        break;
+                    }
+                    Next(Step.AwaitPublicClaim);
+                    break;
+                }
                 Require(!File.Exists(stagedPath) && !File.Exists(ParentEntity.GetBlueprintHeaderFullPath(
                     Path.GetDirectoryName(stagedPath), Path.GetFileNameWithoutExtension(stagedPath))), "Staging paths already exist.");
                 source.SaveToDiskAtPath(stagedPath, isBlueprintExport: false);
@@ -162,7 +192,8 @@ public sealed class Probe : BaseUnityPlugin
                 SpawnReplacement();
                 break;
             case Step.Recover:
-                RecoverReplacement();
+                if (publicClaim) ObservePublicRecovery();
+                else RecoverReplacement();
                 break;
             case Step.AwaitReplacement:
                 if (replacement == null || !replacement.IsInitialized || !replacement.isDestroyed) return;
@@ -185,7 +216,32 @@ public sealed class Probe : BaseUnityPlugin
                 Report("RELOAD_PASS same SGUID and destroyed state, local build permission, exactly one native live grid and saved entry");
                 step = Step.Off;
                 break;
+            case Step.AwaitPublicClaim:
+                if (claim!.State == WreckClaimState.Pending) return;
+                Require(claim.State == WreckClaimState.Claimed && claim.ClaimedGrid != null,
+                    "The public claim did not commit: " + claim.FailureReason);
+                Require(ReplacementMatches(claim.ClaimedGrid!), "The public hook returned a different or non-owned wreck.");
+                VerifyNativeIndex();
+                WriteReceipt();
+                Report("STAGED_PASS public hook rejected a duplicate and saved one player-owned wreck with the original SGUID");
+                step = Step.Off;
+                break;
         }
+    }
+
+    private string PublicPendingDirectory()
+        => Path.GetFullPath(Path.Combine(Application.persistentDataPath, "Save_Data", "Characters", character, "keel-wreck-claim.pending"));
+
+    private void ObservePublicRecovery()
+    {
+        Require(PlanetarySystem.CurrentStarData.seed == star.seed, "Recovery loaded a different system.");
+        if (Directory.Exists(PublicPendingDirectory())) return;
+        var target = BlockEntityManager.Entities.FirstOrDefault(entity => entity != null && entity.SGUID == identity);
+        if (target == null || !target.IsInitialized) return;
+        Require(ReplacementMatches(target), "Public restart recovery did not preserve the expected wreck.");
+        VerifyNativeIndex();
+        Report("RECOVERED_PASS public journal resumed in a fresh process with one owned stock save entry");
+        step = Step.Off;
     }
 
     private void ReadSnapshot()

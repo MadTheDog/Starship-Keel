@@ -1,6 +1,6 @@
 # Grid destruction notifications
 
-Keel 0.1.10 exposes an experimental observer for stock gameplay destruction of an initialized grid in an active solo session. The capability targets Steam build ID 26451593 / 26w45a and checks its native contract separately from other hooks.
+Keel 0.2.0 exposes an experimental observer for stock gameplay destruction of an initialized grid in an active solo session. The capability targets Steam build ID 26451593 / 26w45a and checks its native contract separately from other hooks.
 
 Enable `[Experimental] EnableGridDestruction` or set `SEVO_KEEL_EXPERIMENTAL_GRID_DESTRUCTION=1`. `GridDestruction.IsAvailable` reports whether the hook is installed. Delivery also requires an active local server, an initialized grid, and the game thread.
 

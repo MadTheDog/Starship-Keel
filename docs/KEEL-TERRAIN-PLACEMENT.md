@@ -1,6 +1,6 @@
 # Keel terrain material placement
 
-Keel 0.1.10 provides a material substitution rule for freshly generated terrain. An independent mod can turn a stock surface into ore on a selected planet. Another mod can make rock strata use a different stock surface on asteroids. Both declare source and destination material references through the same rule API.
+Keel 0.2.0 provides a material substitution rule for freshly generated terrain. An independent mod can turn a stock surface into ore on a selected planet. Another mod can make rock strata use a different stock surface on asteroids. Both declare source and destination material references through the same rule API.
 
 Use a disposable solo world in a managed profile. Enable `[Experimental] EnableTerrainPlacement` or set `SEVO_KEEL_EXPERIMENTAL_TERRAIN_PLACEMENT=1`. Check `TerrainPlacement.IsAvailable` for the admitted native hook.
 

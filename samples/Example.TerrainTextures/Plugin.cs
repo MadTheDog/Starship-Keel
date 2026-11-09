@@ -17,7 +17,7 @@ using World.Terrain;
 namespace Sevo.Example.TerrainTextures
 {
     [BepInPlugin(Id, "Keel Terrain Texture Probe", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private const string Id = "example.terraintextures";

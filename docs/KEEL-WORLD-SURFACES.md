@@ -1,6 +1,6 @@
 # World surface queries and resident terrain editing
 
-Both capabilities are experimental and require a managed solo profile on Keel 0.1.10. Enable `EnableWorldSurfaceQuery` in the `Experimental` config section, or set `SEVO_KEEL_EXPERIMENTAL_WORLD_SURFACE_QUERY=1`. Enable edits separately with `EnableTerrainEdits` or `SEVO_KEEL_EXPERIMENTAL_TERRAIN_EDITS=1`. The profile capability reports are `worldSurfaceQuery` and `terrainEdits`.
+Both capabilities are experimental and require a managed solo profile on Keel 0.2.0. Enable `EnableWorldSurfaceQuery` in the `Experimental` config section, or set `SEVO_KEEL_EXPERIMENTAL_WORLD_SURFACE_QUERY=1`. Enable edits separately with `EnableTerrainEdits` or `SEVO_KEEL_EXPERIMENTAL_TERRAIN_EDITS=1`. The profile capability reports are `worldSurfaceQuery` and `terrainEdits`.
 
 ## Query a loaded surface
 

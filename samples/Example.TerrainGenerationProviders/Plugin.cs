@@ -7,7 +7,7 @@ using World.Terrain.Planet;
 namespace Sevo.Example.TerrainGenerationProviders
 {
     [BepInPlugin(Id, "Terrain Generation Provider Probe", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed class TerrainGenerationProbe : BaseUnityPlugin
     {
         private const string Id = "example.terrain-providers";

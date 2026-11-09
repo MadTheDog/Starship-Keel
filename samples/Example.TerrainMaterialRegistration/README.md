@@ -1,6 +1,6 @@
 # Terrain material registration probe
 
-Build the sample against Keel 0.1.10 and Starship EVO Steam build 26451593 / 26w45a. Copy only the sample DLL into an isolated test installation. Set `SEVO_KEEL_TERRAIN_MATERIAL_PROBE=1` and `SEVO_KEEL_EXPERIMENTAL_TERRAIN_MATERIAL_REGISTRATION=1` in a managed disposable profile.
+Build the sample against Keel 0.2.0 and Starship EVO Steam build 26451593 / 26w45a. Copy only the sample DLL into an isolated test installation. Set `SEVO_KEEL_TERRAIN_MATERIAL_PROBE=1` and `SEVO_KEEL_EXPERIMENTAL_TERRAIN_MATERIAL_REGISTRATION=1` in a managed disposable profile.
 
 The sample registers independent cliff and raw-iron backings. It checks their assigned IDs, the persistent registry, the global terrain material count, and the copied native material rows. Look for `KEEL_TERRAIN_MATERIAL_PROBE PASS`.
 

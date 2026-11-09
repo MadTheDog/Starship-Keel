@@ -15,7 +15,7 @@ using World;
 namespace Sevo.Example.CelestialLayout;
 
 [BepInPlugin(Owner, "Keel Celestial Layout Probe", "0.1.0")]
-[BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+[BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
 public sealed partial class Plugin : BaseUnityPlugin
 {
     private const string Owner = "example.celestial-layout";

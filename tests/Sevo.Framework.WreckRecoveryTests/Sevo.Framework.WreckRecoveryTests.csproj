@@ -6,5 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../samples/Example.WreckClaimProbe/WreckRecoverySnapshot.cs" Link="WreckRecoverySnapshot.cs" />
+    <Compile Include="../../src/Sevo.Framework.Runtime/WreckClaimJournal.cs" Link="WreckClaimJournal.cs" />
+    <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" />
+    <Reference Include="Mono.Cecil" HintPath="../../.refs/bepinex/Mono.Cecil.dll" />
   </ItemGroup>
 </Project>

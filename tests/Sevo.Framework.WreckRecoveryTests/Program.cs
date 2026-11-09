@@ -1,4 +1,7 @@
 using Sevo.Example.WreckClaimProbe;
+using Sevo.Framework.Runtime;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 var root = Path.Combine(AppContext.BaseDirectory, "wreck-recovery-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -50,3 +53,70 @@ static void Reject(Action action)
     catch (Exception error) when (error is InvalidOperationException or IOException or System.Runtime.Serialization.SerializationException) { return; }
     throw new Exception("Invalid wreck snapshot was accepted.");
 }
+// The journal can resume a partial native publication only when the existing bytes match.
+var publication = Path.Combine(AppContext.BaseDirectory, "KeelWreckClaim-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(publication);
+try
+{
+    var nativeBody = Path.Combine(publication, "wreck.sevo");
+    var nativeMetadata = Path.Combine(publication, "wreck.xml");
+    byte[] stagedBody = { 1, 2, 3 };
+    byte[] stagedMetadata = { 4, 5, 6 };
+    var path = Path.Combine(publication, "claim.bin");
+    var claim = new WreckClaimJournal(profile, "Player", 123, "system", "NPC-21", (20L, -30L, 40L), (0f, 0f, 0f, 1f),
+        WreckClaimFiles.Digest(stagedBody), WreckClaimFiles.Digest(stagedMetadata));
+    claim.Publish(path);
+    var reopened = WreckClaimJournal.Open(path, profile, "Player", 123);
+    Require(reopened.Identity == "NPC-21" && reopened.System == "system" && reopened.Position == claim.Position,
+        "Recovery lost the accepted target or transform.");
+    Reject(() => WreckClaimJournal.Open(path, Guid.NewGuid(), "Player", 123));
+    Reject(() => WreckClaimJournal.Open(path, profile, "Other player", 123));
+    Reject(() => WreckClaimJournal.Open(path, profile, "Player", 124));
+    Require(!WreckClaimJournal.IsIdentity("../other") && !WreckClaimJournal.IsIdentity("Com2"),
+        "Unsafe stock save names must be rejected before retirement.");
+    File.WriteAllBytes(nativeBody, stagedBody);
+    WreckClaimFiles.Publish(nativeBody, stagedBody);
+    WreckClaimFiles.Publish(nativeMetadata, stagedMetadata);
+    if (!File.ReadAllBytes(nativeBody).SequenceEqual(stagedBody) || !File.ReadAllBytes(nativeMetadata).SequenceEqual(stagedMetadata))
+        throw new Exception("Matching orphan publication did not resume.");
+    File.WriteAllBytes(nativeBody, new byte[] { 7 });
+    try
+    {
+        WreckClaimFiles.Publish(nativeBody, stagedBody);
+        throw new Exception("An unrelated native body was overwritten.");
+    }
+    catch (IOException)
+    {
+        if (!File.ReadAllBytes(nativeBody).SequenceEqual(new byte[] { 7 }))
+            throw new Exception("Conflicting native file changed.");
+    }
+    Reject(() => reopened.ReadPayload(nativeBody, nativeMetadata));
+}
+finally
+{
+    foreach (var file in Directory.EnumerateFiles(publication)) File.Delete(file);
+    Directory.Delete(publication);
+}
+Console.WriteLine("Claim journal scope, partial native publication and conflict handling passed.");
+
+using var native = ModuleDefinition.ReadModule(args.Single());
+var available = ContractAudit.EvaluateWreckClaim(native);
+Require(available.Available, available.Reason);
+native.Mvid = Guid.NewGuid();
+Require(ContractAudit.EvaluateWreckClaim(native).Available, "Assembly identity unexpectedly disabled wreck claiming.");
+foreach (var dependency in new[]
+{
+    (Type: "VoxelEngine.ParentEntity", Method: "SaveToDiskAtPath", Call: "GetBlueprintHeaderFullPath"),
+    (Type: "BlockEntitySync", Method: "OnDestroy", Call: "UnregisterNPC"),
+    (Type: "Player_NetworkSetup", Method: "ServerLoadBlueprint", Call: "SetInstanceData"),
+    (Type: "Manager.Save.EntityInstanceSystem_mp", Method: "SaveSystemDataToDisk", Call: "WriteAtomically")
+})
+{
+    var instruction = native.GetType(dependency.Type).Methods.Single(method => method.Name == dependency.Method)
+        .Body.Instructions.Single(instruction => instruction.Operand is MethodReference target && target.Name == dependency.Call);
+    var previous = instruction.OpCode;
+    instruction.OpCode = OpCodes.Nop;
+    Require(!ContractAudit.EvaluateWreckClaim(native).Available, "Changed native dependency was accepted: " + dependency.Call);
+    instruction.OpCode = previous;
+}
+Console.WriteLine("Wreck claim native contract checks passed.");

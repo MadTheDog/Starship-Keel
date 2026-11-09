@@ -16,7 +16,7 @@ using World.Starfield;
 namespace Sevo.Example.GalaxyPreviewProbe
 {
     [BepInPlugin("example.galaxycatalogpreview", "Example Galaxy Catalog Preview", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed partial class Plugin : BaseUnityPlugin
     {
         private const string DiagnosticOwner = "example.galaxycatalogpreview.lifecycle";

@@ -4,7 +4,7 @@ The probe exercises Keel's resident terrain edit service in a rendered disposabl
 
 ## Prepare the fixture
 
-1. Build `Example.TerrainEditProbe.csproj` and stage its DLL in the dedicated Keel 0.1.10 lab. Keep the lab's verified game build, dedicated LocalLow identity, and content registry together. Enable experimental functional blocks, `EnableWorldSurfaceQuery`, and `EnableTerrainEdits`. Set `SEVO_KEEL_TERRAIN_EDIT_PROBE=1` in the lab launch environment.
+1. Build `Example.TerrainEditProbe.csproj` and stage its DLL in the dedicated Keel 0.2.0 lab. Keep the lab's verified game build, dedicated LocalLow identity, and content registry together. Enable experimental functional blocks, `EnableWorldSurfaceQuery`, and `EnableTerrainEdits`. Set `SEVO_KEEL_TERRAIN_EDIT_PROBE=1` in the lab launch environment.
 2. In a disposable solo world, build a stationary fixture over a loaded, gently sloped or level patch of dry planet terrain. Use terrain with visible geometry and room around the target. Place the **Probe Terrain Edit Anchor** 5–10 metres above it with the anchor's up direction pointing away from the surface. Link a stock Switch directly to the anchor while the Switch is off. The probe rays down from the anchor, ignoring its own grid.
 3. Keep the fixture and player near the same patch for the whole sequence. Use a baseline snapshot to confirm that the ray hits resident terrain. Prefer the finest loaded voxel size and the same node on consecutive snapshots. Make a stopped backup of this isolated world and its Keel registry before the first mutation.
 

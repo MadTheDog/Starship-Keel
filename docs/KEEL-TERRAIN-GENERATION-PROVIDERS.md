@@ -1,6 +1,6 @@
 # Keel terrain generation providers
 
-Keel 0.1.10 exposes bounded terrain parameters before stock density publication. A mod can adjust crater distribution on a ring's asteroid templates. A separate mod can reduce canyon relief on selected terrestrial bodies. Both supply typed proposals through the same provider API.
+Keel 0.2.0 exposes bounded terrain parameters before stock density publication. A mod can adjust crater distribution on a ring's asteroid templates. A separate mod can reduce canyon relief on selected terrestrial bodies. Both supply typed proposals through the same provider API.
 
 | Capability | Managed profile setting | Launch flag |
 |---|---|---|

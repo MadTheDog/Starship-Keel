@@ -13,7 +13,7 @@ using VoxelEngine;
 namespace Sevo.Example.CameraViewProbe
 {
     [BepInPlugin(Id, "Keel Camera View Acceptance Probe", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.camera-view-probe";

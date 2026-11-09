@@ -4,7 +4,7 @@ This disposable sample uses stock-backed marker blocks to define a short guidewa
 
 ## Build a fixture
 
-Enable managed experimental functional blocks, `EnableGridPhysics`, and `EnableWorldSurfaceQuery`. Build and install the sample DLL in an isolated Keel 0.1.10 profile.
+Enable managed experimental functional blocks, `EnableGridPhysics`, and `EnableWorldSurfaceQuery`. Build and install the sample DLL in an isolated Keel 0.2.0 profile.
 
 1. Use a stationary grid and place unscaled **Probe Rail Straight** and **Probe Rail Right Turn** markers with matching grid units and up direction. Each segment begins at its marker. The straight extends four units along its local forward axis. The right turn begins tangent to its forward axis and exits four units forward and four units right, facing right. The left turn uses the opposite lateral direction.
 2. Place the turn marker four units ahead of the first straight with the same orientation. To add an exit straight, place it four units ahead and four units right of the turn marker, then orient its forward axis toward the turn's right side. Leave clear space along the path between markers and about 1.5 units above it.

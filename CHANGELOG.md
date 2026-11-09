@@ -1,6 +1,6 @@
 # Starship Keel changelog
 
-## 0.1.10 in development
+## 0.2.0 candidate
 
 - Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.
 - Added experimental terrain texture overrides that preserve stock material IDs and atlas layers.
@@ -11,6 +11,7 @@
 - Added opt-in galaxy publication for a dedicated solo save root, with native map and gate data and a persistent catalog identity check before stock character entry.
 - Added experimental native storage connectors, temporary hose links, and audited Mag-Lock and seat variants.
 - Added experimental context actions, cargo views, seated pose targets, dismount poses, and solo player-owned grid recovery.
+- Added an experimental [wreck claim hook](docs/KEEL-WRECK-CLAIM.md) for mod-owned, pilotless transient NPC wrecks in solo Creative and Survival. Keel stages a recovery journal and transfers the defeated ship to the local player with its original persistent ID.
 - Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
 - Added experimental grid physics timing and force application and fixed-facing slider path providers.
 - Added experimental HUD markers, native target selection, and Event Gate output publication for declared functional blocks.
@@ -48,12 +49,14 @@
 - Verified that stock Survival character creation publishes an authored galaxy catalog and resolves its gate route in both directions. The native save retained the Survival mode.
 - Verified a disposable ordinary NPC wreck handoff. The test retired its source and restored a single player-owned wreck with the same persistent ID and defeat state after a fresh-process reload.
 - Verified recovery from a deliberate stop after removing an ordinary NPC wreck in Survival. A new process restored the staged wreck and a third launch found exactly one live wreck and one stock save entry with the original identity.
+- Verified the public wreck claim hook in Creative and Survival. It rejected duplicate requests, and a fresh stock load in each mode found one locally owned defeated wreck with the original ID. A separate Survival run resumed a pending public claim after restart and confirmed the replacement on a further stock reload.
 
 ### Current limits
 
 - Galaxy publication is solo-only and requires a dedicated marked save root. Gate transit was verified in one direction.
 - Surface depth uses a supplied or surveyed field. Keel does not infer a global stock height field from streamed terrain.
-- Camera follow and sublight control support a loaded ship within the documented local-player bounds. Full remote possession and NPC or generated wreck ownership transfer still require verified native transitions.
+- Camera follow and sublight control support a loaded ship within the documented local-player bounds. Full remote cockpit control is a separate capability.
+- Wreck claiming currently covers caller-owned transient NPC sources. Stock terrain wrecks have an independent respawn lifecycle.
 
 ## 0.1.9
 

@@ -1,6 +1,6 @@
 # Rocky-body environments
 
-Keel 0.1.10 exposes an experimental environment hook for rocky planets and moons in managed solo profiles. Enable `EnableBodyEnvironment` in the BepInEx configuration or set `SEVO_KEEL_EXPERIMENTAL_BODY_ENVIRONMENT=1`. A dependent plugin declares changes during `Awake`.
+Keel 0.2.0 exposes an experimental environment hook for rocky planets and moons in managed solo profiles. Enable `EnableBodyEnvironment` in the BepInEx configuration or set `SEVO_KEEL_EXPERIMENTAL_BODY_ENVIRONMENT=1`. A dependent plugin declares changes during `Awake`.
 
 ```csharp
 using Sevo.Framework.Runtime;

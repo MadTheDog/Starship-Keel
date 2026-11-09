@@ -21,7 +21,7 @@ using Placement = Sevo.Framework.Runtime.TerrainPlacement;
 namespace Sevo.Example.TerrainPlacement
 {
     [BepInPlugin(Id, "Terrain Placement Probe", "0.1.0")]
-    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.10")]
+    [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.2.0")]
     public sealed class TerrainPlacementProbe : BaseUnityPlugin
     {
         private const string Id = "example.terrain-placement";

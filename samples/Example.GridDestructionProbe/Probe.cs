@@ -13,7 +13,7 @@ using VoxelEngine;
 namespace Sevo.Example.GridDestructionProbe
 {
     [BepInPlugin(Id, "Keel Grid Destruction Probe", "0.1.0")]
-    [BepInDependency(Plugin.Id, "0.1.10")]
+    [BepInDependency(Plugin.Id, "0.2.0")]
     public sealed class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.grid-destruction";

@@ -1,6 +1,6 @@
 # Celestial layout probe
 
-This sample uses the Keel 0.1.10 candidate on Steam build 26451593 / 26w45a. It runs only in the dedicated SEVO Keel Gen Lab 0110 game identity. Enable `SEVO_KEEL_EXPERIMENTAL_CELESTIAL_LAYOUT=1` and `SEVO_KEEL_CELESTIAL_LAYOUT_PROBE=1`.
+This sample uses the Keel 0.2.0 candidate on Steam build 26451593 / 26w45a. It runs only in the dedicated SEVO Keel Gen Lab 0110 game identity. Enable `SEVO_KEEL_EXPERIMENTAL_CELESTIAL_LAYOUT=1` and `SEVO_KEEL_CELESTIAL_LAYOUT_PROBE=1`.
 
 The probe chooses a non-introduction system with at least two free native body slots. It appends one rocky moon to a stock planet and one rocky planet to the primary star. `KEEL_CELESTIAL_LAYOUT_PROBE PASS` confirms that the stock slots stay stable, both declarations resolve in the expected order, mission lookups agree with the stock generator, and the native deep-space points refer to their actual orbit bodies.
 
