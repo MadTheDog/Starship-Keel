@@ -134,7 +134,15 @@ namespace Sevo.Example.TerrainEditProbe
                         int offsetIndex = ring == 0 ? 0 : 1 + (ring - 1) % 48;
                         Vector3 highOrigin = approach + ScanOffset(approachUp, offsetIndex, ring <= 48 ? 250f : 1000f);
                         float range = Mathf.Clamp(planet.radius * 0.15f, 100f, 50000f);
-                        if (!RayDry(highOrigin, approachUp, range, out var ground, out _)) return;
+                        if (!RayDry(highOrigin, approachUp, range, out var ground, out _))
+                        {
+                            if ((scanIndex - 1) % 32 == 0)
+                            {
+                                float playerDistance = Vector3.Distance(Dependency.PlayerManager.TransformData.WorldPosition, approach);
+                                Logger.LogInfo(FormattableString.Invariant($"KEEL_TERRAIN_FIXTURE request={autoId:N} scan={scanIndex} hit={ground.type} distance={ground.distance:R} playerFromApproach={playerDistance:R}"));
+                            }
+                            return;
+                        }
                         site = ground.SystemPosition;
                         up = (PositionManager.ToWorldPosition(site) - centre).normalized;
                         player.SetTransform(PositionManager.ToSystemPosition(PositionManager.ToWorldPosition(site) + 8f * up),
