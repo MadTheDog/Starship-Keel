@@ -46,6 +46,16 @@ try
 }
 finally { save.OpCode = saveOpcode; }
 
+var payload = module.GetType("World.Terrain.OctreeNodeResources/NodeSaveRequest").Methods.Single(method => method.Name == "BuildPayload");
+var copy = payload.Body.Instructions.Single(instruction => instruction.Operand is MethodReference reference && reference.Name == "CopyToSameChunk");
+var copyOpcode = copy.OpCode;
+copy.OpCode = OpCodes.Nop;
+try
+{
+    if (EditAudit().Available) throw new Exception("The terrain edit audit admitted a missing deferred live density copy.");
+}
+finally { copy.OpCode = copyOpcode; }
+
 var sampleMath = typeof(ContractAudit).Assembly.GetType("Sevo.Framework.Runtime.TerrainEditMath")
     ?? throw new Exception("Expected terrain brush density math.");
 var combine = sampleMath.GetMethod("Combine", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;

@@ -25,7 +25,7 @@ The edit casts a fresh ray against native terrain and centres a spherical brush 
 
 The preview accepts a radius up to four metres, at most eight resident nodes, and one terrain-hit request per rendered frame. The selected node and any affected native saveable nodes must already have loaded density and geometry. A boundary touching an unavailable node or leaving the current octree root yields `TerrainNotReady` before a write. A stock planet terrain hit is required. Fully empty chunks and asteroid edits are outside this preview.
 
-`Queued` means density was published and native geometry rebuild and persistence work were scheduled. Stock processing decides when these operations finish. A native exception during publication disables terrain edits for the session and can leave a partially queued edit. Use a disposable profile for acceptance. The interface does not allocate missing terrain, stream areas, produce mining loot, or introduce a separate save format.
+`Queued` means density was published and native geometry rebuild and persistence work were scheduled. Stock processing decides when these operations finish. The service stages original samples and prepares the native geometry and save queues for every changed node before writing densities. If a copy fails, it restores all attempted nodes in reverse order before the stock queues consume live density. The service disables itself after a native failure and identifies any nodes whose restoration also failed. Foliage refresh follows a successful density commit. Stock persistence writes each node asynchronously, so process exits and disk failures can still leave incomplete saves. Use a disposable profile for acceptance.
 
 ## Verification
 

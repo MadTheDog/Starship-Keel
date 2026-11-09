@@ -72,7 +72,7 @@ namespace Sevo.Framework.Runtime
             catch (Exception exception)
             {
                 enabled = false;
-                warn?.Invoke("Terrain edits disabled after a native operation failed. A partially queued edit may remain: " + exception.Message);
+                warn?.Invoke("Terrain edits disabled after a native operation failed: " + exception.Message);
                 return TerrainEditResult.Failed;
             }
         }
@@ -81,11 +81,11 @@ namespace Sevo.Framework.Runtime
             float planeOffset, float radius, bool fill)
         {
             var table = OctreeNodeResources.OctreeNodeDatas;
-            if (!OctreeNodeResources.saveParsed || hit.elementId <= 0 || hit.elementId >= table.Length)
+            if (!OctreeNodeResources.saveParsed || !table.IsCreated || hit.elementId <= 0 || hit.elementId >= table.Length)
                 return TerrainEditResult.TerrainNotReady;
 
             var selected = table[hit.elementId];
-            if (selected.transformId != hit.transformId || selected.planetGenerationId == 0
+            if (selected.transformId != hit.transformId || selected.planetGenerationId == 0 || selected.asteroidId != 0
                 || !IsResident(selected) || selected.ultimateParentId <= 0 || selected.ultimateParentId >= table.Length
                 || hit.TransformData.scale != 1f)
                 return TerrainEditResult.TerrainNotReady;
@@ -117,7 +117,7 @@ namespace Sevo.Framework.Runtime
                     if (!OctreeNodeResources.ShouldSaveNode((int)node.VoxelSize)) continue;
                     if (!DensityLatticeTouches(node, centre, radiusVector)) continue;
                     if (nodes.Count == MaximumNodes || !IsResident(node) || (id != selected.ultimateParentId && node.ultimateParentId != selected.ultimateParentId)
-                        || node.planetGenerationId != selected.planetGenerationId || !densityIds.Add(node.densitiesId))
+                        || node.planetGenerationId != selected.planetGenerationId || node.asteroidId != 0 || !densityIds.Add(node.densitiesId))
                         return TerrainEditResult.TerrainNotReady;
                     var prepared = new PreparedNode(id, node);
                     nodes.Add(prepared);
@@ -127,14 +127,24 @@ namespace Sevo.Framework.Runtime
                 if (!densityIds.Contains(selected.densitiesId))
                     return TerrainEditResult.TerrainNotReady;
 
-                bool changed = false;
-                foreach (var prepared in nodes)
+                var changed = nodes.FindAll(node => node.Changed);
+                if (changed.Count == 0) return TerrainEditResult.NoChange;
+
+                // The stock queues consume the live density only later on the game thread.
+                TerrainEditBatch.Commit(changed, node => node.Queue(), node => node.Write(),
+                    node => node.Restore(), node => node.Description);
+                foreach (var prepared in changed)
                 {
-                    if (!prepared.Changed) continue;
-                    prepared.Publish(hit.SystemPosition);
-                    changed = true;
+                    try { prepared.RefreshProps(hit.SystemPosition); }
+                    catch (Exception exception)
+                    {
+                        enabled = false;
+                        warn?.Invoke("Terrain density committed and scheduled. Terrain edits disabled after stock prop refresh failed at "
+                            + prepared.Description + ": " + exception.Message);
+                        break;
+                    }
                 }
-                return changed ? TerrainEditResult.Queued : TerrainEditResult.NoChange;
+                return TerrainEditResult.Queued;
             }
             finally
             {
@@ -176,6 +186,8 @@ namespace Sevo.Framework.Runtime
             private readonly int id;
             private OctreeNodeData node;
             private NativeArray<VoxelNodeData> samples;
+            private NativeArray<VoxelNodeData> originals;
+            internal string Description => $"node {id} tree={node.treeGuid:x16} density={node.densitiesId}";
             internal bool Changed { get; private set; }
 
             internal PreparedNode(int id, OctreeNodeData node)
@@ -206,22 +218,48 @@ namespace Sevo.Framework.Runtime
                         next = fillMaterial;
                     next.Density = density;
                     if (next.density == original.density) continue;
+                    if (!Changed) originals = new NativeArray<VoxelNodeData>(samples, Allocator.Temp);
                     samples[index] = next;
                     Changed = true;
                 }
             }
 
-            internal void Publish(Vector3l systemPoint)
+            internal void Queue()
             {
-                OctreeNodeResources.SetVoxelData(ref node.densitiesId, samples);
-                if (node.fadeState == NodeFadeState.fadeIn) OctreeNodeJobs.toGeoCompute.Add(id);
-                else node.isGeoDirty = true;
-                PropNodeItems.RemoveGrassAndPlants(systemPoint, ref node);
                 OctreeNodeResources.QueueNodeSave(ref node, id);
-                OctreeNodeResources.OctreeNodeDatas[id] = node;
+                if (node.fadeState == NodeFadeState.fadeIn)
+                {
+                    OctreeNodeJobs.toGeoCompute.Add(id);
+                }
+                else
+                {
+                    node.isGeoDirty = true;
+                    OctreeNodeResources.OctreeNodeDatas[id] = node;
+                }
             }
 
-            public void Dispose() => samples.Dispose();
+            internal void Write() => CopyToResidentSlot(samples);
+            internal void Restore() => CopyToResidentSlot(originals);
+
+            private void CopyToResidentSlot(NativeArray<VoxelNodeData> source)
+            {
+                int densityId = node.densitiesId;
+                OctreeNodeResources.SetVoxelData(ref densityId, source);
+                if (densityId != node.densitiesId)
+                    throw new InvalidOperationException("The resident density slot changed during copy.");
+            }
+
+            internal void RefreshProps(Vector3l systemPoint)
+            {
+                try { PropNodeItems.RemoveGrassAndPlants(systemPoint, ref node); }
+                finally { OctreeNodeResources.OctreeNodeDatas[id] = node; }
+            }
+
+            public void Dispose()
+            {
+                if (originals.IsCreated) originals.Dispose();
+                samples.Dispose();
+            }
         }
     }
 }

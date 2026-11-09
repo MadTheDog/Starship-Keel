@@ -37,6 +37,13 @@ namespace Sevo.Framework.Runtime
                 var read = Require(resources, "CopyDensityDataToArray", true, nothing, integer, samples);
                 var write = Require(resources, "SetVoxelData", true, nothing, integer + "&", samples);
                 var save = Require(resources, "QueueNodeSave", true, nothing, node + "&", integer);
+                const string saveRequest = resources + "/NodeSaveRequest";
+                const string savePayload = "World.Terrain.NodeSavePayload";
+                var buildPayload = Require(saveRequest, "BuildPayload", false, nothing, savePayload);
+                var writePayload = Require(saveRequest, "WritePayloadToDisk", false, nothing);
+                var flush = Require(resources, "FlushPendingNodeSaves", true, nothing, "System.String");
+                var dispatch = Method(module, resources, "BuildAndScheduleNodeSave", true, nothing, saveRequest)
+                    ?? throw new InvalidOperationException("Native terrain save dispatch is missing.");
                 var traverse = Require(node, "GetOverlappingNodes", false, nothing, "UnityEngine.Vector3",
                     "Unity.Collections.NativeList`1<System.Int32>", integer, "System.Single");
                 var removeProps = Require("World.PropNodeItems", "RemoveGrassAndPlants", true, nothing, "Vector3l", node + "&");
@@ -67,6 +74,32 @@ namespace Sevo.Framework.Runtime
                     || !CallsNamed(read, "CopyToSameChunk") || !CallsNamed(write, "CopyFromSameChunk"))
                     throw new InvalidOperationException("The native terrain edit, geometry, or persistence path changed.");
 
+                if (!dispatch.HasBody)
+                    throw new InvalidOperationException("Native terrain save dispatch has no managed body.");
+                int buildIndex = -1;
+                int taskIndex = -1;
+                for (int i = 0; i < dispatch.Body.Instructions.Count; i++)
+                {
+                    var instruction = dispatch.Body.Instructions[i];
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt)
+                        || instruction.Operand is not MethodReference called) continue;
+                    if (called.FullName == buildPayload.FullName) buildIndex = i;
+                    if (called.DeclaringType.FullName == "System.Threading.Tasks.Task" && called.Name == "Run") taskIndex = i;
+                }
+
+                if (!Calls(flush, dispatch) || buildIndex < 0 || taskIndex <= buildIndex
+                    || !CallsNamed(buildPayload, "CopyToSameChunk")
+                    || !buildPayload.Body.Instructions.Any(instruction =>
+                        SurfaceField(instruction, Code.Ldfld, node, "densitiesId", integer))
+                    || !dispatch.Body.Instructions.Any(instruction => instruction.OpCode.Code == Code.Ldftn
+                        && instruction.Operand is MethodReference called && called.FullName == writePayload.FullName)
+                    || !save.Body.Instructions.Any(instruction => instruction.OpCode.Code == Code.Newobj
+                        && instruction.Operand is MethodReference called && called.DeclaringType.FullName == saveRequest)
+                    || !CallsNamed(save, "set_Item")
+                    || Calls(save, dispatch) || Calls(save, buildPayload) || Calls(save, writePayload)
+                    || CallsNamed(save, "CopyToSameChunk") || CallsNamed(save, "Run"))
+                    throw new InvalidOperationException("Native terrain save queue no longer defers its live density copy until flush.");
+
                 string geoState = module.GetType(node)?.Fields.SingleOrDefault(field => field.Name == "geoState")?.FieldType.FullName ?? "";
                 string fadeState = module.GetType(node)?.Fields.SingleOrDefault(field => field.Name == "fadeState")?.FieldType.FullName ?? "";
                 RequireSurfaceEnum(module, geoState, "hasGeo", (int)NodeGeoState.hasGeo);
@@ -80,6 +113,7 @@ namespace Sevo.Framework.Runtime
                     || !Field(module, node, "transformId", integer, false)
                     || !Field(module, node, "ultimateParentId", integer, false)
                     || !Field(module, node, "planetGenerationId", integer, false)
+                    || !Field(module, node, "asteroidId", integer, false)
                     || !Field(module, node, "densitiesId", integer, false)
                     || !Field(module, node, "treeGuid", "System.UInt64", false)
                     || !Field(module, node, "densityComputed", flag, false)
