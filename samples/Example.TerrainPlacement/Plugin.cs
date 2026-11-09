@@ -22,6 +22,7 @@ namespace Sevo.Example.TerrainPlacement
         private const string Id = "example.terrain-placement";
         private const string Iron = "RAW_IRON_A";
         private const string CustomIron = "example.terrainmaterial:iron";
+        private static readonly TerrainRadialBand ProbeBand = new TerrainRadialBand(-2000, 0);
         private string[] sources = { "TEX_ROCK_A", "TEX_ROCK_B", "LARGE_ROCK_A", "LARGE_ROCK_B", "DIRTY_ROCK_A", "DIRTY_ROCK_B" };
         private static TerrainPlacementProbe? instance;
         private Harmony? hook;
@@ -29,6 +30,7 @@ namespace Sevo.Example.TerrainPlacement
         private List<string>? materialNames;
         private byte destination;
         private bool useCustom;
+        private bool radial;
         private bool tested;
         private bool testedBaked;
         private bool sawRaw;
@@ -36,6 +38,11 @@ namespace Sevo.Example.TerrainPlacement
         private NativeArray<VoxelNodeData> pending;
         private VoxelNodeData[]? original;
         private VoxelNodeData[]? bakedOriginal;
+        private OctreeNodeData pendingNode;
+        private float pendingRadius;
+        private int insideBand;
+        private int outsideBand;
+        private readonly HashSet<int> remappedLevels = new HashSet<int>();
 
         private void Awake()
         {
@@ -48,23 +55,32 @@ namespace Sevo.Example.TerrainPlacement
         {
             instance = this;
             useCustom = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_CUSTOM") == "1";
+            radial = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL") == "1";
             var requested = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_SOURCES");
             if (!string.IsNullOrWhiteSpace(requested))
                 sources = requested!.Split(';').Select(name => name.Trim()).Where(name => name.Length > 0)
                     .Distinct(StringComparer.Ordinal).ToArray();
             var target = useCustom ? TerrainMaterialReference.Registered(CustomIron) : TerrainMaterialReference.Stock(Iron);
             for (int index = 0; index < sources.Length; index++)
-                Placement.Register(Id, "rock-" + index, TerrainPlacementScope.All,
-                    TerrainMaterialReference.Stock(sources[index]), target);
+            {
+                var source = TerrainMaterialReference.Stock(sources[index]);
+                if (radial)
+                    Placement.RegisterPlanetRadialBand(Id, "rock-" + index, source, target, ProbeBand);
+                else
+                    Placement.Register(Id, "rock-" + index, TerrainPlacementScope.All, source, target);
+            }
             hook = new Harmony(Id);
             hook.Patch(AccessTools.DeclaredMethod(typeof(DensityComputeJob), "OnReadbackFinished"),
                 postfix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveRaw)));
             hook.Patch(AccessTools.DeclaredMethod(typeof(OctreeNodeResources), nameof(OctreeNodeResources.SetVoxelData)),
                 prefix: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObservePublication)));
-            hook.Patch(AccessTools.DeclaredMethod(typeof(DensityComputeJob), nameof(DensityComputeJob.DispatchImmediate)),
-                transpiler: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveSynchronousReadback)));
-            hook.Patch(AccessTools.DeclaredMethod(typeof(AsteroidFieldResources), "BakeAsteroidLOD"),
-                transpiler: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveSynchronousMeshInput)));
+            if (!radial)
+            {
+                hook.Patch(AccessTools.DeclaredMethod(typeof(DensityComputeJob), nameof(DensityComputeJob.DispatchImmediate)),
+                    transpiler: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveSynchronousReadback)));
+                hook.Patch(AccessTools.DeclaredMethod(typeof(AsteroidFieldResources), "BakeAsteroidLOD"),
+                    transpiler: new HarmonyMethod(typeof(TerrainPlacementProbe), nameof(ObserveSynchronousMeshInput)));
+            }
         }
 
         private void OnDestroy()
@@ -73,13 +89,25 @@ namespace Sevo.Example.TerrainPlacement
             if (ReferenceEquals(instance, this)) instance = null;
         }
 
-        private static void ObserveRaw(AsyncGPUReadbackRequest __0, NativeArray<VoxelNodeData> ___voxelNodeDatas)
+        private static void ObserveRaw(AsyncGPUReadbackRequest __0, NativeArray<VoxelNodeData> ___voxelNodeDatas, int ___nodeId)
         {
             var self = instance;
             if (self == null || self.tested || !Placement.IsAvailable || __0.hasError
                 || PlayerState.sessionMode != PlayerState.SessionMode.solo || !___voxelNodeDatas.IsCreated) return;
             try
             {
+                OctreeNodeData radialNode = default;
+                float radialRadius = 0;
+                if (self.radial)
+                {
+                    if (!Placement.AreRadialBandsAvailable || ___nodeId <= 0) return;
+                    var node = OctreeNodeResources.OctreeNodeDatas[___nodeId];
+                    if (node.planetGenerationId == 0) return;
+                    var body = PlanetarySystem.SolarBodies.FirstOrDefault(value => value.planetGenerationId == node.planetGenerationId);
+                    if (body == null || body.radius <= 0) return;
+                    radialNode = node;
+                    radialRadius = body.radius;
+                }
                 if (self.sourceIds.Count == 0 && !self.ResolveFixtureIds()) return;
                 if (!self.sawRaw)
                 {
@@ -92,6 +120,8 @@ namespace Sevo.Example.TerrainPlacement
                     if (sample.density >= 0 || (!self.sourceIds.Contains(sample.texId0) && !self.sourceIds.Contains(sample.texId1))) continue;
                     self.pending = ___voxelNodeDatas;
                     self.original = ___voxelNodeDatas.ToArray();
+                    self.pendingNode = radialNode;
+                    self.pendingRadius = radialRadius;
                     return;
                 }
             }
@@ -133,9 +163,52 @@ namespace Sevo.Example.TerrainPlacement
         {
             var self = instance;
             if (self == null || self.tested || self.original == null || !__1.Equals(self.pending)) return;
-            self.tested = true;
             var before = self.original;
+            self.original = null;
+            if (self.radial)
+            {
+                self.CheckRadial(before, __1);
+                return;
+            }
+            self.tested = true;
             self.Check(before, index => __1[index], "TERRAIN PLACEMENT PROBE", "native octree copy");
+        }
+
+        private void CheckRadial(VoxelNodeData[] before, NativeArray<VoxelNodeData> after)
+        {
+            const int width = OctreeNodeData.DENSITY_WIDTH;
+            for (int index = 0; index < before.Length; index++)
+            {
+                var stock = before[index];
+                var current = after[index];
+                var local = pendingNode.GetPosition(index % width, index / width % width, index / (width * width));
+                double x = (double)pendingNode.position.x + local.x;
+                double y = (double)pendingNode.position.y + local.y;
+                double z = (double)pendingNode.position.z + local.z;
+                double offset = Math.Sqrt(x * x + y * y + z * z) - pendingRadius;
+                bool inBand = offset >= ProbeBand.MinimumOffset && offset < ProbeBand.MaximumOffset;
+                byte Expected(byte id) => inBand && sourceIds.Contains(id) ? destination : id;
+                if (current.density != stock.density || current.color != stock.color
+                    || current.texId0 != Expected(stock.texId0) || current.texId1 != Expected(stock.texId1))
+                {
+                    tested = true;
+                    Logger.LogError("TERRAIN RADIAL PLACEMENT PROBE FAIL: native sample diverged at offset " + offset);
+                    return;
+                }
+                if (stock.density >= 0 || (!sourceIds.Contains(stock.texId0) && !sourceIds.Contains(stock.texId1))) continue;
+                if (inBand)
+                {
+                    insideBand++;
+                    remappedLevels.Add(pendingNode.level);
+                }
+                else
+                    outsideBand++;
+            }
+            if (remappedLevels.Count < 2 || outsideBand == 0) return;
+            tested = true;
+            Logger.LogInfo("TERRAIN RADIAL PLACEMENT PROBE PASS: " + insideBand + " solid samples in band; "
+                + outsideBand + " outside; remapped LODs " + string.Join(", ", remappedLevels.OrderBy(level => level))
+                + "; density and packed color matched.");
         }
 
         private static IEnumerable<CodeInstruction> ObserveSynchronousReadback(IEnumerable<CodeInstruction> instructions)

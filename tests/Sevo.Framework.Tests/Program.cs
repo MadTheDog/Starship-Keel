@@ -34,6 +34,8 @@ checks += TerrainGenerationProviderTests.Run();
 checks += GalaxyCatalogTests.Run();
 checks += GalaxyCatalogPinTests.Run();
 checks += TerrainPlacementTests.Run();
+checks += GridDestructionTests.Run();
+checks += GalaxyCatalogPreEntryTests.Run();
 void Check(bool ok,string name) { checks++; if(!ok) throw new Exception(name); }
 void Reject(Action action,string name) { checks++; try { action(); } catch(InvalidOperationException) { return; } throw new Exception(name); }
 ContentRequest R(string key,int revision=1) => new(key,ResourceKind.Brick,revision);

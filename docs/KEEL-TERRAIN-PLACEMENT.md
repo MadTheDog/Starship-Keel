@@ -19,6 +19,23 @@ Use `TerrainMaterialReference.Registered("owner:local-name")` for a destination 
 
 Asynchronous generation applies the mapping only to successful GPU readbacks in the native valid-node branch before copying into the octree. Synchronous asteroid baking applies the same mapping after stock GPU readback and before stock mesh jobs. The mapping has no LOD-dependent input. Shader material sampling can still vary across levels. Saved chunks enter the stock save-load path and retain their stored materials, so enable the intended rule set before generating terrain and keep the same set when reopening its world.
 
-The hook selects by existing stock material, scope, and optional seed. Depth rules and spatial voxel placement require a validated reference frame and separate LOD checks.
+## Planet and moon radial bands
+
+Enable the base hook and `[Experimental] EnableTerrainRadialPlacement` or set `SEVO_KEEL_EXPERIMENTAL_TERRAIN_RADIAL_PLACEMENT=1`. Check `TerrainPlacement.AreRadialBandsAvailable` after startup. The extra audit covers native sample centres, density ordering and the body reference frame. Ordinary substitutions stay available if this audit fails.
+
+```csharp
+TerrainPlacement.RegisterPlanetRadialBand(ownerId, localName,
+    TerrainMaterialReference.Stock(sourceShaderName),
+    TerrainMaterialReference.Registered(destinationKey),
+    new TerrainRadialBand(-300, -100), seed: targetPlanetSeed);
+```
+
+Offsets are metres from the nominal planet radius, with an inclusive minimum and an exclusive maximum. Negative offsets select inward and positive offsets outward. Surface relief and caves vary around the nominal sphere, so a band does not measure the distance to the local surface. A mod can use this contract to place deeper ore or distinguish sediment layers. Sample spacing varies with the native level of detail. Use bands wide enough for the levels at which the layer must appear.
+
+Keel resolves up to 16 disjoint bands for each source material on a body. Overlapping bands, an unconditional substitution for the same source, or more than 16 bands leave that source at its stock value. Rules for other sources still apply. Asteroid generation uses the ordinary placement rules. A missing body or invalid coordinate leaves the radial rules unapplied.
 
 Build [Example.TerrainPlacement](../samples/Example.TerrainPlacement/Example.TerrainPlacement.csproj) and set `SEVO_KEEL_TERRAIN_PLACEMENT_PROBE=1` in a disposable lab to compare the stock readback with the native octree or baked mesh input. The sample normally targets stock raw iron. Set `SEVO_KEEL_TERRAIN_PLACEMENT_CUSTOM=1` alongside the terrain material registration sample to use its registered iron row. The probe reports encountered native materials and requires at least one matching solid sample. Override the lab source list with `SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_SOURCES` using semicolon-separated stock shader names.
+
+Set `SEVO_KEEL_TERRAIN_PLACEMENT_PROBE_RADIAL=1` and enter a new solo world to compare inside- and outside-band planet samples before the stock octree copy. The probe requires remapped solid samples in two levels and unchanged solid samples outside the band.
+
+In Keel's isolated lab, build the Fluid Probe sample as well and set `SEVO_KEEL_LAB_BOOT_SURVIVAL=1` with the runner's `-FluidProbe` switch to start the stock Survival introduction near the planet. The boot fixture skips the fluid test in this mode.

@@ -46,6 +46,8 @@ namespace Sevo.Framework.Runtime
             && string.Equals(providerKey, key, StringComparison.Ordinal)
             && revision == requestedRevision && string.Equals(fingerprint, digest, StringComparison.Ordinal);
 
+        internal bool BelongsTo(Guid expectedProfile) => profileId == expectedProfile;
+
         internal bool ContainsWorld(string name, ulong seed)
             => worlds.Any(world => SameName(world.Name, name) && world.Seed == seed);
 

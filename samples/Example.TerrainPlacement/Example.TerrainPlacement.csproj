@@ -8,5 +8,7 @@
     <Reference Include="UnityEngine"><HintPath>..\..\.refs\game\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>..\..\.refs\game\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Unity.Collections"><HintPath>..\..\.refs\game\Unity.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>..\..\.refs\game\Unity.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.MathematicsModule" Condition="Exists('..\..\.refs\game\UnityEngine.MathematicsModule.dll')"><HintPath>..\..\.refs\game\UnityEngine.MathematicsModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

@@ -99,6 +99,67 @@ namespace Sevo.Framework.Runtime
             }
         }
 
+        public static CapabilityResult EvaluateTerrainRadialPlacement(ModuleDefinition module)
+        {
+            const string capability = "terrainRadialPlacement";
+            const string float3 = "Unity.Mathematics.float3";
+            const string int32 = "System.Int32";
+            try
+            {
+                if (!Field(module, PlacementNode, "position", float3, false))
+                    throw new InvalidOperationException("Planet node coordinates changed.");
+                var radius = RequireTerrainProviderMethod(module, TerrainBody, "get_radius", false, "System.Single");
+                var size = RequireTerrainProviderMethod(module, PlacementNode, "get_VoxelSize", false, "System.Single");
+                var position = RequireTerrainProviderMethod(module, PlacementNode, "GetPosition", false, float3, int32, int32, int32);
+                var centreCode = position.Body.Instructions.Where(instruction => instruction.OpCode.Code != Code.Nop).ToArray();
+                if (!radius.IsPublic || !position.IsPublic || !size.IsPublic || centreCode.Length != 23
+                    || centreCode[0].OpCode.Code != Code.Ldarg_0
+                    || !TerrainPlacementCall(centreCode[1], PlacementNode, size.Name)
+                    || !TerrainPlacementAxis(centreCode, 2, Code.Ldarg_1)
+                    || !TerrainPlacementAxis(centreCode, 8, Code.Ldarg_2)
+                    || !TerrainPlacementAxis(centreCode, 14, Code.Ldarg_3)
+                    || centreCode[20].OpCode.Code != Code.Newobj
+                    || centreCode[20].Operand is not MethodReference constructor || constructor.DeclaringType.FullName != float3
+                    || !TerrainPlacementCall(centreCode[21], float3, "op_Multiply") || centreCode[22].OpCode.Code != Code.Ret)
+                    throw new InvalidOperationException("Native planet voxel centres changed.");
+
+                var index = RequireTerrainProviderMethod(module, PlacementVoxel, "ToDensityId", true, int32, int32, int32, int32);
+                var code = index.Body.Instructions;
+                if (!code.Select(instruction => instruction.OpCode.Code).SequenceEqual(new[]
+                    {
+                        Code.Ldarg_0, Code.Ldarg_1, Code.Ldc_I4_S, Code.Mul, Code.Add,
+                        Code.Ldarg_2, Code.Ldc_I4_S, Code.Mul, Code.Ldc_I4_S, Code.Mul, Code.Add, Code.Ret
+                    }) || Constant(code[2]) != 20 || Constant(code[6]) != 20 || Constant(code[8]) != 20)
+                    throw new InvalidOperationException("Native density sample ordering changed.");
+
+                var geometry = module.GetType("World.Terrain.OctreeNodeJobs/Job_GeoCompute")?.Methods
+                    .SingleOrDefault(method => method.Name == "GetVertex" && method.HasBody);
+                if (geometry == null)
+                    throw new InvalidOperationException("Native planet geometry no longer uses body-relative voxel centres.");
+                var instructions = geometry.Body.Instructions;
+                var nodePosition = instructions.FirstOrDefault(instruction =>
+                    TerrainProviderField(instruction, Code.Ldfld, PlacementNode, "position"));
+                if (nodePosition == null || !instructions.Skip(instructions.IndexOf(nodePosition) + 1).Take(26)
+                    .Any(instruction => TerrainPlacementCall(instruction, "Unity.Mathematics.math", "length"))
+                    || !instructions.Skip(instructions.IndexOf(nodePosition) + 1).Take(16)
+                    .Any(instruction => TerrainPlacementCall(instruction, PlacementNode, "GetPosition")))
+                    throw new InvalidOperationException("Native planet geometry no longer uses body-relative voxel centres.");
+
+                return new CapabilityResult(capability, true, "Native planet radius, voxel centres and density ordering validated.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
+        private static bool TerrainPlacementAxis(Instruction[] code, int start, Code argument)
+            => code[start].OpCode.Code == argument
+                && (code[start + 1].OpCode.Code is Code.Ldc_I4 or Code.Ldc_I4_S) && Constant(code[start + 1]) == 10
+                && code[start + 2].OpCode.Code == Code.Sub && code[start + 3].OpCode.Code == Code.Conv_R4
+                && code[start + 4].OpCode.Code == Code.Ldc_R4 && Equals(code[start + 4].Operand, 0.5f)
+                && code[start + 5].OpCode.Code == Code.Add;
+
         private static bool TerrainPlacementCall(Instruction instruction, string type, string name)
             => instruction.OpCode.Code is Code.Call or Code.Callvirt
                 && instruction.Operand is MethodReference method && method.DeclaringType.FullName == type && method.Name == name;

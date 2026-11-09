@@ -86,6 +86,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult oreDiscovery;
                 CapabilityResult terrainMaterials;
                 CapabilityResult storageConnectors;
+                CapabilityResult flushStoragePlacement;
                 CapabilityResult nativeBlockVariants;
                 CapabilityResult contextActions;
                 CapabilityResult inventoryViews;
@@ -100,6 +101,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult gridPhysics;
                 CapabilityResult mechanismPaths;
                 CapabilityResult gridAttachments;
+                CapabilityResult gridDestruction;
                 CapabilityResult navigationMarkers;
                 CapabilityResult navigationTargets;
                 CapabilityResult logicOutputs;
@@ -111,6 +113,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult celestialLayout;
                 CapabilityResult galaxyCatalogPreview;
                 CapabilityResult terrainPlacement;
+                CapabilityResult terrainRadialPlacement;
                 CapabilityResult terrainMiningDrops;
                 CapabilityResult planetTerrainGeneration;
                 CapabilityResult asteroidTerrainGeneration;
@@ -146,6 +149,7 @@ namespace Sevo.Framework.Runtime
                     oreDiscovery = ContractAudit.EvaluateOreDiscovery(metadata.MainModule);
                     terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
                     storageConnectors = ContractAudit.EvaluateStorageConnectors(metadata.MainModule);
+                    flushStoragePlacement = ContractAudit.EvaluateFlushStoragePlacement(metadata.MainModule);
                     nativeBlockVariants = ContractAudit.EvaluateNativeBlockVariants(metadata.MainModule);
                     contextActions = ContractAudit.EvaluateContextActions(metadata.MainModule);
                     inventoryViews = ContractAudit.EvaluateInventoryViews(metadata.MainModule);
@@ -160,6 +164,7 @@ namespace Sevo.Framework.Runtime
                     gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
                     gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
+                    gridDestruction = ContractAudit.EvaluateGridDestruction(metadata.MainModule);
                     navigationMarkers = ContractAudit.EvaluateNavigationMarkers(metadata.MainModule);
                     navigationTargets = ContractAudit.EvaluateNavigationTargets(metadata.MainModule);
                     logicOutputs = ContractAudit.EvaluateLogicOutputs(metadata.MainModule);
@@ -171,6 +176,7 @@ namespace Sevo.Framework.Runtime
                     celestialLayout = ContractAudit.EvaluateCelestialLayout(metadata.MainModule);
                     galaxyCatalogPreview = ContractAudit.EvaluateGalaxyCatalogPreview(metadata.MainModule);
                     terrainPlacement = ContractAudit.EvaluateTerrainPlacement(metadata.MainModule);
+                    terrainRadialPlacement = ContractAudit.EvaluateTerrainRadialPlacement(metadata.MainModule);
                     terrainMiningDrops = ContractAudit.EvaluateTerrainMiningDrops(metadata.MainModule);
                     planetTerrainGeneration = ContractAudit.EvaluatePlanetTerrainGeneration(metadata.MainModule);
                     asteroidTerrainGeneration = ContractAudit.EvaluateAsteroidTerrainGeneration(metadata.MainModule);
@@ -300,6 +306,13 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(terrainPlacement,
                         patches => TerrainPlacement.Install(patches, message => Logger.LogWarning(message)),
                         TerrainPlacement.Disable));
+                if (terrainRadialPlacement.Available && !terrainPlacement.Available)
+                    terrainRadialPlacement = new CapabilityResult(terrainRadialPlacement.Name, false, "Requires the terrain placement hook.");
+                terrainRadialPlacement = InstallContentHook(terrainRadialPlacement, "EnableTerrainRadialPlacement", "TERRAIN_RADIAL_PLACEMENT", () =>
+                {
+                    TerrainPlacement.EnableRadialBands();
+                    return terrainRadialPlacement;
+                });
                 planetTerrainGeneration = InstallContentHook(planetTerrainGeneration, "EnablePlanetTerrainGeneration", "PLANET_TERRAIN_GENERATION",
                     () => InstallContentHookPatches(planetTerrainGeneration, patches =>
                         TerrainGenerationProvider.InstallPlanet(patches, message => Logger.LogWarning(message)),
@@ -313,6 +326,10 @@ namespace Sevo.Framework.Runtime
                 storageConnectors = InstallContentHook(storageConnectors, "EnableStorageConnectors", "STORAGE_CONNECTORS",
                     () => InstallContentHookPatches(storageConnectors, StorageConnectorRegistration.Install,
                         StorageConnectorRegistration.Disable));
+                if (!storageConnectors.Available && flushStoragePlacement.Available)
+                    flushStoragePlacement = new CapabilityResult(flushStoragePlacement.Name, false, "Requires native storage connectors.");
+                flushStoragePlacement = InstallContentHook(flushStoragePlacement, "EnableFlushStoragePlacement", "FLUSH_STORAGE_PLACEMENT",
+                    () => InstallContentHookPatches(flushStoragePlacement, FlushStoragePlacement.Install, FlushStoragePlacement.Disable));
                 if (!experimental && nativeBlockVariants.Available)
                     nativeBlockVariants = new CapabilityResult(nativeBlockVariants.Name, false, "Requires managed experimental brick registration.");
                 nativeBlockVariants = InstallContentHook(nativeBlockVariants, "EnableNativeBlockVariants", "NATIVE_BLOCK_VARIANTS",
@@ -390,10 +407,15 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(mechanismPaths,
                         patches => MechanismPathProvider.Install(patches, message => Logger.LogWarning(message)),
                         MechanismPathProvider.Disable));
-                if (gridAttachments.Available)
-                    gridAttachments = new CapabilityResult(gridAttachments.Name, false,
-                        "Native Mag-Lock detours are disabled pending safe runtime installation.");
-                Logger.LogInfo(gridAttachments.Name + ": " + gridAttachments.Reason);
+                gridAttachments = InstallContentHook(gridAttachments, "EnableGridAttachments", "GRID_ATTACHMENTS", () =>
+                {
+                    GridAttachmentService.Enable(message => Logger.LogWarning(message));
+                    return gridAttachments;
+                }, GridAttachmentService.Disable);
+                gridDestruction = InstallContentHook(gridDestruction, "EnableGridDestruction", "GRID_DESTRUCTION",
+                    () => InstallContentHookPatches(gridDestruction,
+                        patches => GridDestruction.Install(patches, message => Logger.LogWarning(message)),
+                        GridDestruction.Disable));
                 navigationMarkers = InstallContentHook(navigationMarkers, "EnableNavigationMarkers", "NAVIGATION_MARKERS",
                     () => InstallContentHookPatches(navigationMarkers,
                         patches => NavigationMarkerProvider.Install(patches, message => Logger.LogWarning(message)),
@@ -422,7 +444,7 @@ namespace Sevo.Framework.Runtime
                         GridRecoveryService.Enable();
                         return gridRecovery;
                     }, GridRecoveryService.Disable);
-                if (!experimental && (vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
+                if (!experimental && (vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || gridDestruction.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
                     || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
@@ -430,7 +452,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths, gridAttachments, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainRadialPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

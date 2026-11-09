@@ -29,6 +29,7 @@ public sealed class Plugin : BaseUnityPlugin
     private bool pending;
     private bool startSolo;
     private bool drainStalledFrame;
+    private bool bootSurvivalOnly;
     private bool roundTrip;
     private int harnessFrames;
     private ParentEntity? grid;
@@ -54,11 +55,15 @@ public sealed class Plugin : BaseUnityPlugin
                 "The probe only operates in the disposable Keel hooks lab.");
             ProfileProtocol.Open(state!, Paths.GameRootPath, session);
             startSolo = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_START_SOLO") == "1";
+            bootSurvivalOnly = startSolo && Environment.GetEnvironmentVariable("SEVO_KEEL_LAB_BOOT_SURVIVAL") == "1";
             drainStalledFrame = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_DRAIN_STALLED_FRAME") == "1";
             roundTrip = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_ROUNDTRIP") == "1";
-            FluidRegistration.Register(Owner, "coolant", 1, new FluidDefinition("Probe Coolant", 0x32aaff, 1.12f, 0f));
-            FluidRegistration.Register(Owner, "brine", 1, new FluidDefinition("Probe Brine", 0x88aa44, 1.24f, 0f));
-            FluidRegistration.RegisterTick(Owner, "pipe-loop", Tick);
+            if (!bootSurvivalOnly)
+            {
+                FluidRegistration.Register(Owner, "coolant", 1, new FluidDefinition("Probe Coolant", 0x32aaff, 1.12f, 0f));
+                FluidRegistration.Register(Owner, "brine", 1, new FluidDefinition("Probe Brine", 0x88aa44, 1.24f, 0f));
+                FluidRegistration.RegisterTick(Owner, "pipe-loop", Tick);
+            }
             clock.Start();
             pending = true;
             Step("waiting-for-world");
@@ -166,17 +171,18 @@ public sealed class Plugin : BaseUnityPlugin
             yield return null;
             var creation = UnityEngine.Object.FindAnyObjectByType<UI_CharacterCreation>();
             Require(creation != null && UI_CharacterCreation.IsActive.Value, "Stock character creation did not open.");
-            Read<InputField>(creation!, "input").text = "FluidProbe-" + session.Substring(0, 8);
+            Read<InputField>(creation!, "input").text = (bootSurvivalOnly ? "TerrainProbe-" : "FluidProbe-") + session.Substring(0, 8);
             Read<InputField>(creation!, "inputSeed").text = "11062645";
             creation!.OnInput();
             creation.OnSeedUpdated();
-            if (!Read<bool>(creation, "isCreative"))
+            if (Read<bool>(creation, "isCreative") == bootSurvivalOnly)
                 creation.OnGameModeButton();
-            Require(Read<bool>(creation, "isCreative") && !Read<bool>(creation, "isInvalid"),
-                "Stock character creation rejected the creative fixture.");
+            Require(Read<bool>(creation, "isCreative") != bootSurvivalOnly && !Read<bool>(creation, "isInvalid"),
+                "Stock character creation rejected the requested fixture.");
             NetworkServer.dontListen = true;
             creation.PlayWithNewCharacter();
         }
+        if (bootSurvivalOnly) yield break;
         while (!SoloReady() || !FluidRegistration.IsAvailable || GameloopManager.jobStarted)
         {
             CheckDeadline();

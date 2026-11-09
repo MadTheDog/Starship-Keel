@@ -26,6 +26,7 @@ namespace Sevo.Framework.Runtime
             new ConditionalWeakTable<DensityComputeJob, object>();
         private static readonly object Completed = new object();
         private static Action<string>? report;
+        private static bool radialBands;
         private static int mainThread;
         private static TerrainPlacementRule[]? declarations;
         private static NativeArray<TerrainMaterialData> materialPublication;
@@ -34,11 +35,20 @@ namespace Sevo.Framework.Runtime
         private static Dictionary<string, byte>? stockNames;
 
         public static bool IsAvailable => report != null;
+        public static bool AreRadialBandsAvailable => IsAvailable && radialBands;
 
         public static void Register(string ownerId, string localName, TerrainPlacementScope scope,
             TerrainMaterialReference source, TerrainMaterialReference destination, ulong? seed = null)
+            => AddRule(new TerrainPlacementRule(ownerId + ":" + localName, scope, source, destination, seed));
+
+        /// <summary>Replaces a source material in a planet or moon's nominal elevation band.</summary>
+        public static void RegisterPlanetRadialBand(string ownerId, string localName,
+            TerrainMaterialReference source, TerrainMaterialReference destination, TerrainRadialBand band, ulong? seed = null)
+            => AddRule(new TerrainPlacementRule(ownerId + ":" + localName, TerrainPlacementScope.Planets,
+                source, destination, seed, band));
+
+        private static void AddRule(TerrainPlacementRule rule)
         {
-            var rule = new TerrainPlacementRule(ownerId + ":" + localName, scope, source, destination, seed);
             lock (Gate)
             {
                 if (declarations != null) throw new InvalidOperationException("Terrain placement registration is closed for this process.");
@@ -46,6 +56,8 @@ namespace Sevo.Framework.Runtime
                 Rules.Add(rule.Key, rule);
             }
         }
+
+        internal static void EnableRadialBands() => radialBands = true;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static void Install(Harmony harmony, Action<string> warning)
@@ -69,6 +81,7 @@ namespace Sevo.Framework.Runtime
         internal static void Disable()
         {
             report = null;
+            radialBands = false;
             Plans.Clear();
             stockNames = null;
             materialPublication = default;
@@ -126,15 +139,18 @@ namespace Sevo.Framework.Runtime
                     if (values.IsCreated && values.Length == VoxelCount)
                     {
                         var scope = node.planetGenerationId != 0 ? TerrainPlacementScope.Planets : TerrainPlacementScope.Asteroids;
-                        var seed = Seal().Any(rule => (rule.Scope & scope) != 0 && rule.BodySeed.HasValue)
-                            ? FindSeed(node) : null;
+                        bool needsBody = Seal().Any(rule => (rule.Scope & scope) != 0
+                            && (rule.BodySeed.HasValue || (radialBands && rule.Band.HasValue)));
+                        float radius = 0f;
+                        var seed = needsBody ? FindSeed(node, out radius) : null;
                         var plan = GetPlan(scope, seed);
                         if (plan?.HasChanges == true)
                         {
+                            bool mapRadial = plan.HasRadialBands && CanMapRadial(node, radius);
                             for (int index = 0; index < values.Length; index++)
                             {
                                 var original = values[index];
-                                var updated = Remap(original, plan);
+                                var updated = mapRadial ? RemapRadial(original, plan, node, radius, index) : Remap(original, plan);
                                 if (updated.texId0 != original.texId0 || updated.texId1 != original.texId1)
                                     values[index] = updated;
                             }
@@ -172,12 +188,39 @@ namespace Sevo.Framework.Runtime
             return value;
         }
 
-        private static ulong? FindSeed(OctreeNodeData node)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool CanMapRadial(in OctreeNodeData node, float radius)
+            => radius > 0f && float.IsFinite(radius) && node.VoxelSize > 0f && float.IsFinite(node.VoxelSize);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static VoxelNodeData RemapRadial(VoxelNodeData value, TerrainPlacementPlan plan,
+            in OctreeNodeData node, float radius, int index)
         {
+            if (!plan.NeedsRadialOffset(value.texId0) && !plan.NeedsRadialOffset(value.texId1))
+                return Remap(value, plan);
+
+            const int width = OctreeNodeData.DENSITY_WIDTH;
+            var centre = node.GetPosition(index % width, index / width % width, index / (width * width));
+            double x = (double)node.position.x + centre.x;
+            double y = (double)node.position.y + centre.y;
+            double z = (double)node.position.z + centre.z;
+            double offset = Math.Sqrt(x * x + y * y + z * z) - radius;
+            value.texId0 = plan.Map(value.texId0, offset);
+            value.texId1 = plan.Map(value.texId1, offset);
+            return value;
+        }
+
+        private static ulong? FindSeed(OctreeNodeData node, out float radius)
+        {
+            radius = 0f;
             if (node.planetGenerationId != 0)
             {
                 foreach (var body in PlanetarySystem.SolarBodies)
-                    if (body.planetGenerationId == node.planetGenerationId) return body.Seed;
+                {
+                    if (body.planetGenerationId != node.planetGenerationId) continue;
+                    if (radialBands) radius = GetNominalRadius(body);
+                    return body.Seed;
+                }
                 return null;
             }
             var asteroids = AsteroidResources.datas;
@@ -185,6 +228,9 @@ namespace Sevo.Framework.Runtime
                 ? asteroids[node.asteroidId].seed
                 : (ulong?)null;
         }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static float GetNominalRadius(SolarBody body) => body.radius;
 
         private static TerrainPlacementPlan? GetPlan(TerrainPlacementScope scope, ulong? seed)
         {
@@ -210,7 +256,7 @@ namespace Sevo.Framework.Runtime
             var key = (scope, planSeed);
             if (!Plans.TryGetValue(key, out var plan))
             {
-                plan = TerrainPlacementPlan.Build(rules, scope, planSeed, ResolveMaterial, WarnOnce);
+                plan = TerrainPlacementPlan.Build(rules, scope, planSeed, ResolveMaterial, WarnOnce, radialBands);
                 Plans.Add(key, plan);
             }
             return plan;

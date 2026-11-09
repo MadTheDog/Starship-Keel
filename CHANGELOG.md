@@ -13,9 +13,13 @@
 - Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
 - Added experimental grid physics timing and force application and fixed-facing slider path providers.
 - Added experimental HUD markers, native target selection, and Event Gate output publication for declared functional blocks.
-- Added a candidate grid attachment API. Runtime support stays disabled pending safe native installation.
+- Added opt-in grid attachment and release requests through stock Mag-Lock acquisition.
+- Added an opt-in read-only observer for authoritative gameplay grid destruction.
 - Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
 - Added a separate HoverRail guide sample and geometry checks.
+- Added opt-in planet and moon material bands relative to the native nominal body radius.
+- Added read-only galaxy catalog checks for installed asset references, loaded aliases, and selected save identity.
+- Added an opt-in Creative solo prototype for flush placement of registered item fittings against stock cargo faces.
 
 ## 0.1.9
 

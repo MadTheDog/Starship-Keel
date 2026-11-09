@@ -68,6 +68,12 @@ namespace Sevo.Example.GalaxyPreviewProbe
             {
                 var stock = AssetRepoGalaxy.Distribution;
                 ObserveBindings(stock, "pre-entry");
+                if (Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_SOURCE_PROBE") == "1")
+                {
+                    var source = GalaxyCatalogPreview.AuditPreEntrySource();
+                    Logger.Log(source.Available ? BepInEx.Logging.LogLevel.Info : BepInEx.Logging.LogLevel.Error,
+                        "KEEL_GALAXY_SOURCE_PROBE " + (source.Available ? "PASS " : "FAIL ") + source.Reason);
+                }
                 PlanetarySystem.OnNewSystem += ObserveLoadedBindings;
                 var intro = GameIntroductionResources.STARTING_SYSTEM;
                 var start = new GalaxyStarSeed(intro.seed, intro.sector.x, intro.sector.y, intro.sector.z);
