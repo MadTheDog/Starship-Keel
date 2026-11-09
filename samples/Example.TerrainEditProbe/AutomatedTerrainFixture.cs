@@ -20,11 +20,13 @@ namespace Sevo.Example.TerrainEditProbe
         private AutoPhase autoPhase;
         private bool autoArmed;
         private bool autoPending;
+        private bool coarseRelocated;
         private float autoDeadline;
         private float nextAttempt;
         private float nextStatus;
         private int safeSteps;
         private int scanIndex;
+        private int refusedEdits;
         private int planetId;
         private Vector3l site;
         private Vector3l measurementOrigin;
@@ -71,6 +73,7 @@ namespace Sevo.Example.TerrainEditProbe
             }
             if (autoArmed && Time.realtimeSinceStartup > autoDeadline)
                 FinishAutomation(false, "timed_out_" + autoPhase);
+            if (!autoArmed) UninstallCoarseApproachObserver();
             if (autoArmed && autoPhase != AutoPhase.Approach && Time.realtimeSinceStartup >= nextStatus)
             {
                 nextStatus = Time.realtimeSinceStartup + 10f;
@@ -87,7 +90,11 @@ namespace Sevo.Example.TerrainEditProbe
             Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} accepted={accepted} phase={autoPhase} detail={detail}");
         }
 
-        private void OnDestroy() => GameloopManager.OnTransformJobFinished -= AdvanceAutomatedFixture;
+        private void OnDestroy()
+        {
+            GameloopManager.OnTransformJobFinished -= AdvanceAutomatedFixture;
+            UninstallCoarseApproachObserver();
+        }
 
         private void AdvanceAutomatedFixture()
         {
@@ -133,6 +140,7 @@ namespace Sevo.Example.TerrainEditProbe
                 {
                     case AutoPhase.Approach:
                         // This is the stock survival introduction's approach to this planet.
+                        InstallCoarseApproachObserver();
                         Vector3 radial = (-(Vector3)transform.systemPosition.ToFloat3()).normalized;
                         radial = (radial + 0.5f * Vector3.up).normalized;
                         site = transform.LocalToSystem(1.05f * planet.radius * radial);
@@ -146,10 +154,17 @@ namespace Sevo.Example.TerrainEditProbe
                         Vector3 approachUp = (approach - centre).normalized;
                         int ring = scanIndex++ % 97;
                         int offsetIndex = ring == 0 ? 0 : 1 + (ring - 1) % 48;
-                        Vector3 highOrigin = approach + ScanOffset(approachUp, offsetIndex, ring <= 48 ? 250f : 1000f);
-                        float range = Mathf.Clamp(planet.radius * 0.15f, 100f, 50000f);
+                        float spacing = ring <= 48 ? 250f : 1000f;
+                        if (coarseRelocated) spacing *= 0.016f;
+                        Vector3 highOrigin = approach + ScanOffset(approachUp, offsetIndex, spacing);
+                        float range = coarseRelocated ? 100f : Mathf.Clamp(planet.radius * 0.15f, 100f, 50000f);
                         if (!RayDry(highOrigin, approachUp, range, out var ground, out _))
                         {
+                            if (!coarseRelocated && TryTakeCoarseApproach(out var candidate))
+                            {
+                                RelocateAboveCoarseMesh(player, candidate);
+                                return;
+                            }
                             if ((scanIndex - 1) % 32 == 0)
                             {
                                 float playerDistance = Vector3.Distance(Dependency.PlayerManager.TransformData.WorldPosition, approach);
@@ -158,24 +173,34 @@ namespace Sevo.Example.TerrainEditProbe
                             return;
                         }
                         site = ground.SystemPosition;
-                        up = (PositionManager.ToWorldPosition(site) - centre).normalized;
-                        player.SetTransform(PositionManager.ToSystemPosition(PositionManager.ToWorldPosition(site) + 8f * up),
+                        Vector3 surface = PositionManager.ToWorldPosition(site);
+                        up = (surface - centre).normalized;
+                        player.SetTransform(PositionManager.ToSystemPosition(surface + 8f * up),
                             Quaternion.identity);
                         scanIndex = 0;
                         autoPhase = AutoPhase.FindPatch;
                         nextAttempt += 1f;
-                        Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} descent range={ground.distance:R}");
+                        float hitPointError = Vector3.Distance(surface, highOrigin - approachUp * ground.distance);
+                        Logger.LogInfo(FormattableString.Invariant($"KEEL_TERRAIN_FIXTURE request={autoId:N} descent range={ground.distance:R} nativePointError={hitPointError:R}"));
                         break;
                     case AutoPhase.FindPatch:
                         Vector3 origin = PositionManager.ToWorldPosition(site) + 12f * up + ScanOffset(up, scanIndex++ % 49, 4f);
-                        if (!RayDry(origin, up, RayDistance, out var hit, out var node)
-                            || hit.distance < 2f || hit.distance > 17f || Mathf.Abs(Vector3.Dot(hit.WorldNormal, up)) < 0.85f
-                            || !IsInterior(node, hit.localPoint) || !TryRead(hit, out _, out var before)) return;
+                        bool dry = RayDry(origin, up, RayDistance, out var hit, out var node);
+                        float slope = dry ? Mathf.Abs(Vector3.Dot(hit.WorldNormal, up)) : 0f;
+                        bool interior = dry && IsInterior(node, hit.localPoint);
+                        if (!dry || hit.distance < 2f || hit.distance > 17f || slope < 0.85f
+                            || !interior || !TryRead(hit, out _, out var before))
+                        {
+                            if (scanIndex % 16 == 1)
+                                Logger.LogInfo(FormattableString.Invariant($"KEEL_TERRAIN_FIXTURE request={autoId:N} patchScan={scanIndex} kind={hit.type} dry={dry} range={hit.distance:R} voxel={node.VoxelSize:R} slope={slope:R} interior={interior}"));
+                            if (scanIndex >= 49 && !coarseRelocated && TryTakeCoarseApproach(out var dryCandidate))
+                                RelocateAboveCoarseMesh(player, dryCandidate);
+                            return;
+                        }
                         measurementOrigin = PositionManager.ToSystemPosition(origin);
                         tree = node.treeGuid;
                         originalDistance = hit.distance;
-                        WriteEvidence(autoId, "auto-baseline", node, hit.distance, before);
-                        expectedHash = ApplyAutomated(origin, hit, node, before, ProbeOperation.Cut);
+                        if (!TryApplyAutomated(origin, hit, node, before, ProbeOperation.Cut, out expectedHash)) return;
                         autoPhase = AutoPhase.RebuiltCut;
                         break;
                     case AutoPhase.RebuiltCut:
@@ -185,6 +210,16 @@ namespace Sevo.Example.TerrainEditProbe
                 }
             }
             catch (Exception exception) { FinishAutomation(false, exception.Message); }
+        }
+
+        private void RelocateAboveCoarseMesh(SkyTransform player, Vector3l candidate)
+        {
+            site = candidate;
+            coarseRelocated = true;
+            scanIndex = 0;
+            player.SetTransform(site, Quaternion.identity);
+            autoPhase = AutoPhase.FindGround;
+            nextAttempt += 1f;
         }
 
         private bool RayDry(Vector3 origin, Vector3 outward, float range, out VoxelRaycastHit hit, out OctreeNodeData node)
@@ -224,27 +259,39 @@ namespace Sevo.Example.TerrainEditProbe
             Vector3 centre = (Vector3)node.position + localPoint;
             Vector3 extent = BrushRadius * Vector3.one;
             var rootBounds = table[node.ultimateParentId].DensityBoundsTight;
-            return rootBounds.Contains(centre - extent) && rootBounds.Contains(centre + extent);
+            var nodeBounds = node.DensityBoundsTight;
+            return rootBounds.Contains(centre - extent) && rootBounds.Contains(centre + extent)
+                && nodeBounds.Contains(centre - extent) && nodeBounds.Contains(centre + extent);
         }
 
-        private string ApplyAutomated(Vector3 origin, VoxelRaycastHit hit, OctreeNodeData node, Snapshot before,
-            ProbeOperation operation)
+        private bool TryApplyAutomated(Vector3 origin, VoxelRaycastHit hit, OctreeNodeData node, Snapshot before,
+            ProbeOperation operation, out string afterHash)
         {
+            afterHash = "";
             bool fill = operation == ProbeOperation.Fill;
             var result = TerrainEditService.ApplyPlane(origin, -up, RayDistance, up, fill ? PlaneStep : -PlaneStep,
                 BrushRadius, fill ? TerrainEditOperation.FillBelow : TerrainEditOperation.CutAbove);
+            if (result is TerrainEditResult.TerrainNotReady or TerrainEditResult.NoTerrainHit
+                or TerrainEditResult.NoChange or TerrainEditResult.FrameBudgetUsed)
+            {
+                if (refusedEdits++ % 16 == 0)
+                    Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} retry={operation} result={result} tree={node.treeGuid:x16} voxel={node.VoxelSize:R}");
+                return false;
+            }
             if (result != TerrainEditResult.Queued)
                 throw new InvalidOperationException($"{operation} returned {result}.");
             if (!TryRead(hit, out var afterNode, out var after) || afterNode.treeGuid != node.treeGuid
                 || afterNode.densitiesId != node.densitiesId)
                 throw new InvalidOperationException($"{operation} lost the selected native density slot.");
+            WriteEvidence(autoId, fill ? "auto-cut-rebuilt" : "auto-baseline", node, hit.distance, before);
             WriteEvidence(autoId, fill ? "auto-fill-write" : "auto-cut-write", afterNode, hit.distance, after);
             var delta = TerrainEvidence.Compare(before.Density, after.Density);
             Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} operation={operation} changed={delta.Changed}"
                 + $" removedSolid={delta.RemovedSolid} addedSolid={delta.AddedSolid}");
             if (!delta.IsAccepted(operation))
                 throw new InvalidOperationException($"{operation} did not produce the expected signed density changes.");
-            return after.Hash;
+            afterHash = after.Hash;
+            return true;
         }
 
         private void CheckRebuilt(Vector3 origin)
@@ -256,8 +303,8 @@ namespace Sevo.Example.TerrainEditProbe
             {
                 if (hit.distance <= originalDistance + 0.1f) return;
                 cutDistance = hit.distance;
-                WriteEvidence(autoId, "auto-cut-rebuilt", node, hit.distance, snapshot);
-                expectedHash = ApplyAutomated(origin, hit, node, snapshot, ProbeOperation.Fill);
+                if (!TryApplyAutomated(origin, hit, node, snapshot, ProbeOperation.Fill, out var fillHash)) return;
+                expectedHash = fillHash;
                 autoPhase = AutoPhase.RebuiltFill;
                 return;
             }
