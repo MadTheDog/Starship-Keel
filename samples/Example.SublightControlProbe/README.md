@@ -35,3 +35,13 @@ Set `SEVO_KEEL_SUBLIGHT_PROBE_AUTOMATIC=1` in addition to the launch variables a
 The fixture selects a clear position 250 m away and uses the stock server loader with the bundled `V27 Hotwing.sevo`. It verifies that the new grid is locally owned and transient and that the one live stock computer resolves its linked yoke and pilot seat. It uses the native server commands to enter and exit that seat, checks the lease gates during those transitions, and waits for stock exit control to finish. It submits the same bounded forward pulse as manual mode, then requests native removal when the exact fixture is unoccupied and detached.
 
 Look for `KEEL_SUBLIGHT_CONTROL_PROBE AUTO_PASS`, or `AUTO_FAIL` with a stage and reason. Use the manual sequence to test operator re-entry and expiry.
+
+## Automated waypoint approach
+
+Use the same automated launch settings and add `SEVO_KEEL_SUBLIGHT_PROBE_WAYPOINT=1` and `SEVO_KEEL_EXPERIMENTAL_WAYPOINT_FLIGHT=1`. This mode keeps the stock pilot seated and runs the approach fixture in place of the unoccupied thrust pulse.
+
+The fixture loads a second, transient stock blueprint, `Exo-1 Ant`, in the clear corridor ahead of the Hotwing. It requires a valid, visible native tracking row before starting the approach. It checks explicit disposal on the first approach and sets the second release boundary 6 m inside the measured tracking distance once speed is at most 4 m/s. It waits for ordinary stock braking before exiting the pilot seat and removing the two exact fixture grids. Standard-mode stock approach commands full forward thrust. This fixture verifies a short release transition and leaves route safety, clearance planning, and arrival control to the caller.
+
+The fixture aborts if the corridor becomes occupied, the contact disappears, speed reaches 35 m/s, or separation between tracked bounds falls to 105 m. Look for `WAYPOINT_STARTED`, `WAYPOINT_DISPOSED`, another `WAYPOINT_STARTED`, `WAYPOINT_BOUNDARY`, and `WAYPOINT_PASS` in the session log. Runtime acceptance of this mode is pending.
+
+Rendered waypoint acceptance on Steam build ID 26451593 / 26w45a passed in session `87a5396abb0b4042b36522f409293344`. The first lease disposed explicitly. The second began at 201.55 m and 0.21 m/s and released at 195.50 m with the ship still travelling at 14.85 m/s. The stock braking, exit and disposable grid cleanup completed. The test covers tracked contact approach and lease handoff in a clear corridor.

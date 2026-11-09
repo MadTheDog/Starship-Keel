@@ -224,7 +224,11 @@ namespace Sevo.Example.SublightControlProbe
             lease = null;
         }
 
-        private void OnDestroy() => Release();
+        private void OnDestroy()
+        {
+            Release();
+            waypointLease?.Dispose();
+        }
         private void Report(string message) => Logger.LogInfo($"{Prefix} session={session} stage={stage} {message}");
 
         private void Fail(Exception exception)

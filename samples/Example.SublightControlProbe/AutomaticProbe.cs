@@ -15,7 +15,7 @@ namespace Sevo.Example.SublightControlProbe
     public sealed partial class Probe
     {
         private const string Hotwing = "V27 Hotwing";
-        private enum AutoStep { Pending, Spawn, Load, Occupied, Exited, Acquire, Pulse, Cleanup, Removed, Done }
+        private enum AutoStep { Pending, Spawn, Load, Occupied, Waypoint, Exited, Acquire, Pulse, Cleanup, Removed, Done }
         private bool automatic;
         private AutoStep autoStep;
         private string autoCharacter = "";
@@ -38,6 +38,7 @@ namespace Sevo.Example.SublightControlProbe
             Require(autoCharacter.EndsWith("-" + session.Substring(0, 8), StringComparison.Ordinal),
                 "The disposable character must end with the first eight session characters.");
             autoName = "Keel Sublight Probe " + session.Substring(0, 8);
+            waypointMode = Environment.GetEnvironmentVariable("SEVO_KEEL_SUBLIGHT_PROBE_WAYPOINT") == "1";
             automatic = true;
             return true;
         }
@@ -50,8 +51,10 @@ namespace Sevo.Example.SublightControlProbe
             catch (Exception exception)
             {
                 Release();
+                waypointLease?.Dispose();
                 motionPassed = false;
-                Logger.LogError($"{Prefix} AUTO_FAIL session={session} stage={autoStep} {exception.GetBaseException().Message}");
+                string stage = waypointMode && autoStep == AutoStep.Waypoint ? $"{autoStep}/{waypointStep}" : autoStep.ToString();
+                Logger.LogError($"{Prefix} AUTO_FAIL session={session} stage={stage} {exception.GetBaseException().Message}");
                 if (grid != null && autoStep < AutoStep.Cleanup) AdvanceTo(AutoStep.Cleanup);
                 else autoStep = AutoStep.Done;
             }
@@ -79,6 +82,8 @@ namespace Sevo.Example.SublightControlProbe
                     || (autoKey.Length != 0 && BlockEntityManager.instance.GetEntityBySGUID(autoKey) != null)) return;
                 if (motionPassed)
                     Logger.LogInfo($"{Prefix} AUTO_PASS session={session} grid={autoKey} delta={measuredDelta:F3}m/s native enter, exit arbitration, sublight and removal");
+                if (waypointPassed)
+                    Logger.LogInfo($"{Prefix} WAYPOINT_PASS session={session} grid={autoKey} target={waypointKey} native approach, disposal, boundary release and removal");
                 autoStep = AutoStep.Done;
                 return;
             }
@@ -87,6 +92,7 @@ namespace Sevo.Example.SublightControlProbe
                 throw new InvalidOperationException("The exact fixture grid was replaced.");
             if (autoStep == AutoStep.Cleanup)
             {
+                if (waypointMode && !CleanupWaypoint(player)) return;
                 if (entered && (target.controlMode == BaseVehicle.VehicleControlMode.localPlayer
                     || (player.IsSeated && ReferenceEquals(player.LockedEntity?.Parent, target))))
                 {
@@ -119,7 +125,7 @@ namespace Sevo.Example.SublightControlProbe
                 && !target.isDestroyed && IsDetached(target)
                 && target.Type == EntityType.spaceship && target.Sync != null
                 && target.Sync.instanceData.ownerPlayerNetID == player.NetworkSetup.netId
-                && (target.Sync.instanceData.pilotId == 0 || ((autoStep == AutoStep.Occupied || autoStep == AutoStep.Exited
+                && (target.Sync.instanceData.pilotId == 0 || ((autoStep == AutoStep.Occupied || autoStep == AutoStep.Waypoint || autoStep == AutoStep.Exited
                         || autoStep == AutoStep.Acquire)
                     && target.Sync.instanceData.pilotId == player.NetworkSetup.netId)),
                 "Loaded fixture identity, ownership or attachment changed.");
@@ -158,11 +164,26 @@ namespace Sevo.Example.SublightControlProbe
                         && ReferenceEquals(player.LastSpaceship, target), "Stock control did not seat the local pilot on this grid.");
                     Require(target.Systems.ThrustForward > 0f, "The initialized stock ship has no forward thrust.");
                     Reject(target, "during automated stock piloting");
+                    if (waypointMode)
+                    {
+                        AdvanceTo(AutoStep.Waypoint, 80f);
+                        break;
+                    }
+                    RequestExit(player);
+                    AdvanceTo(AutoStep.Exited);
+                    break;
+                case AutoStep.Waypoint:
+                    if (!AdvanceWaypoint(ship, target, player)) return;
                     RequestExit(player);
                     AdvanceTo(AutoStep.Exited);
                     break;
                 case AutoStep.Exited:
                     if (target.controlMode != BaseVehicle.VehicleControlMode.notControlled) return;
+                    if (waypointMode)
+                    {
+                        AdvanceTo(AutoStep.Cleanup);
+                        break;
+                    }
                     Reject(target, "during automated stock post-exit control");
                     AdvanceTo(AutoStep.Acquire, 35f);
                     break;
