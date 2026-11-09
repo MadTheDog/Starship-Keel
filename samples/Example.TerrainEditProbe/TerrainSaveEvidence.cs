@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using BepInEx;
 using Manager;
+using Manager.Save;
 using MessagePack;
 using Mirror;
 using Sevo.Framework.Runtime;
@@ -20,6 +21,7 @@ namespace Sevo.Example.TerrainEditProbe
         private ulong saveTree;
         private int saveLevel;
         private bool saveFlushStarted;
+        private bool saveReloadableCharacter;
         private float saveDeadline;
         private float nextSavePoll;
         private string savePendingReason = "waiting_for_native_flush";
@@ -39,7 +41,8 @@ namespace Sevo.Example.TerrainEditProbe
                 saveExpectedHash = expectedHash;
                 saveTree = node.treeGuid;
                 saveLevel = node.level;
-                saveDeadline = Time.realtimeSinceStartup + 20f;
+                saveReloadableCharacter = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_EDIT_FIXTURE_VERIFY_RELOAD") == "1";
+                saveDeadline = Time.realtimeSinceStartup + (saveReloadableCharacter ? 75f : 20f);
                 // The native flush runs from Update, outside the post-transform callback.
                 GameloopManager.OnTransformJobFinished -= AdvanceAutomatedFixture;
                 Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} native_save_pending={Path.GetFileName(path)}");
@@ -72,7 +75,13 @@ namespace Sevo.Example.TerrainEditProbe
                 {
                     ProfileProtocol.Open(stateDirectory, Paths.GameRootPath, session);
                     saveFlushStarted = true;
-                    OctreeNodeResources.FlushPendingNodeSaves(character);
+                    if (saveReloadableCharacter)
+                    {
+                        if (character != "ConnectorProbe-" + session.Substring(0, 8))
+                            throw new InvalidOperationException("Reload verification requires the stock boot fixture's disposable character.");
+                        SaveManager.SaveOnSceneQuit();
+                    }
+                    else OctreeNodeResources.FlushPendingNodeSaves(character);
                     savePendingReason = "waiting_for_complete_payload";
                     Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} native_save_flush_queued character={character}");
                     return true;
@@ -95,6 +104,11 @@ namespace Sevo.Example.TerrainEditProbe
                     savePendingReason = "native_payload_density_hash_mismatch";
                     return true;
                 }
+                if (saveReloadableCharacter && !File.Exists(PlayerSave_mp.GetPath(character)))
+                {
+                    savePendingReason = "waiting_for_stock_character_file";
+                    return true;
+                }
 
                 string directory = Path.Combine(stateDirectory, "terrain-probe");
                 Directory.CreateDirectory(directory);
@@ -103,11 +117,26 @@ namespace Sevo.Example.TerrainEditProbe
                     output.Write(compressed, 0, compressed.Length);
                 Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} phase=auto-native-save tree={saveTree:x16}"
                     + $" sha256={snapshot.Hash} file={file} bytes={compressed.Length}");
+                if (saveReloadableCharacter) WriteReloadManifest(character);
                 EndSaveEvidence(true, "cut_fill_and_native_disk_payload_verified");
             }
             catch (MessagePackSerializationException) { savePendingReason = "native_payload_decode_failed"; }
             catch (Exception exception) { EndSaveEvidence(false, "native_save_failed: " + exception.Message); }
             return true;
+        }
+
+        private void WriteReloadManifest(string character)
+        {
+            var star = Dependency.PlayerManager.SkyTransform.CurrentSystem;
+            using var manifest = new StreamWriter(new FileStream(Path.Combine(stateDirectory, "terrain-reload-manifest.json"),
+                FileMode.CreateNew, FileAccess.Write, FileShare.Read));
+            manifest.WriteLine("{");
+            manifest.WriteLine($"\"schemaVersion\":1,\"sourceSession\":\"{session}\",\"character\":\"{character}\",");
+            manifest.WriteLine(FormattableString.Invariant(
+                $"\"systemSeed\":\"{star.seed}\",\"sectorX\":{star.sector.x},\"sectorY\":{star.sector.y},\"sectorZ\":{star.sector.z},"));
+            manifest.WriteLine(FormattableString.Invariant(
+                $"\"originX\":\"{measurementOrigin.x}\",\"originY\":\"{measurementOrigin.y}\",\"originZ\":\"{measurementOrigin.z}\","));
+            manifest.WriteLine($"\"tree\":\"{saveTree:x16}\",\"hash\":\"{saveExpectedHash}\"}}");
         }
 
         private bool TryReadNativeSave(string path, out byte[] compressed)
