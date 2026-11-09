@@ -228,6 +228,7 @@ namespace Sevo.Example.SublightControlProbe
         {
             Release();
             waypointLease?.Dispose();
+            ReleaseCombinedCamera();
         }
         private void Report(string message) => Logger.LogInfo($"{Prefix} session={session} stage={stage} {message}");
 

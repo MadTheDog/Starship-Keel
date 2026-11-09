@@ -45,3 +45,11 @@ The fixture loads a second, transient stock blueprint, `Exo-1 Ant`, in the clear
 The fixture aborts if the corridor becomes occupied, the contact disappears, speed reaches 35 m/s, or separation between tracked bounds falls to 105 m. Look for `WAYPOINT_STARTED`, `WAYPOINT_DISPOSED`, another `WAYPOINT_STARTED`, `WAYPOINT_BOUNDARY`, and `WAYPOINT_PASS` in the session log. Runtime acceptance of this mode is pending.
 
 Rendered waypoint acceptance on Steam build ID 26451593 / 26w45a passed in session `87a5396abb0b4042b36522f409293344`. The first lease disposed explicitly. The second began at 201.55 m and 0.21 m/s and released at 195.50 m with the ship still travelling at 14.85 m/s. The stock braking, exit and disposable grid cleanup completed. The test covers tracked contact approach and lease handoff in a clear corridor.
+
+## Combined view and sublight
+
+Enable the camera view and sublight hooks. Set SEVO_KEEL_SUBLIGHT_PROBE_COMBINED_CAMERA=1 in the automatic fixture and leave the waypoint opt-in off. The probe enters the stock pilot seat, exits, and acquires both leases for the same last-piloted grid. It checks that the camera stays on the moving grid while the physical player remains in place, then disposes both leases. It checks that the old drive lease rejects input and that stock restores the camera before entering the original seat again.
+
+COMBINED_LEASES_PASS records simultaneous movement and view. COMBINED_REENTRY_PASS records the completed native reentry. COMBINED_CLEANUP_PASS separately confirms that the subsequent exit and removal finished.
+
+Rendered acceptance on Steam build ID 26451593 / 26w45a passed in session `5d65232277e241fc9f257116189334df`. The same grid gained 2.264 m/s and moved 0.125 m with the camera attached and the physical player retained. Both leases released, the native camera and pilot reentry were confirmed, and cleanup waited for the second stock dismount to complete before removing the grid.

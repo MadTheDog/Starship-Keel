@@ -27,6 +27,7 @@ namespace Sevo.Example.SublightControlProbe
         private bool exitRequested;
         private bool motionPassed;
         private bool returnedPlayer;
+        private string cleanupWait = "";
         private WorldTransform originalPlayerPose;
         private StarData originalPlayerSystem;
         private float measuredDelta;
@@ -39,6 +40,7 @@ namespace Sevo.Example.SublightControlProbe
                 "The disposable character must end with the first eight session characters.");
             autoName = "Keel Sublight Probe " + session.Substring(0, 8);
             waypointMode = Environment.GetEnvironmentVariable("SEVO_KEEL_SUBLIGHT_PROBE_WAYPOINT") == "1";
+            Require(!waypointMode || !CombinedCameraRequested, "Choose either the combined camera or waypoint fixture.");
             automatic = true;
             return true;
         }
@@ -52,6 +54,7 @@ namespace Sevo.Example.SublightControlProbe
             {
                 Release();
                 waypointLease?.Dispose();
+                ReleaseCombinedCamera();
                 motionPassed = false;
                 string stage = waypointMode && autoStep == AutoStep.Waypoint ? $"{autoStep}/{waypointStep}" : autoStep.ToString();
                 Logger.LogError($"{Prefix} AUTO_FAIL session={session} stage={stage} {exception.GetBaseException().Message}");
@@ -66,7 +69,12 @@ namespace Sevo.Example.SublightControlProbe
             float now = Time.unscaledTime;
             if (now > deadline) throw new TimeoutException(autoStep.ToString());
             var player = Dependency.PlayerManager;
-            if (!AutoWorldReady(player)) return;
+            if (!AutoWorldReady(player))
+            {
+                if (autoStep == AutoStep.Cleanup)
+                    ReportCleanupWait($"world-not-ready jobs={GameloopManager.jobStarted} loading={PlayerState.InLoadingScreen} menu={PlayerState.InMenu}");
+                return;
+            }
 
             if (autoStep == AutoStep.Spawn)
             {
@@ -84,6 +92,8 @@ namespace Sevo.Example.SublightControlProbe
                     Logger.LogInfo($"{Prefix} AUTO_PASS session={session} grid={autoKey} delta={measuredDelta:F3}m/s native enter, exit arbitration, sublight and removal");
                 if (waypointPassed)
                     Logger.LogInfo($"{Prefix} WAYPOINT_PASS session={session} grid={autoKey} target={waypointKey} native approach, disposal, boundary release and removal");
+                if (combinedReentryPassed)
+                    Logger.LogInfo($"{Prefix} COMBINED_CLEANUP_PASS session={session} grid={autoKey}");
                 autoStep = AutoStep.Done;
                 return;
             }
@@ -96,18 +106,32 @@ namespace Sevo.Example.SublightControlProbe
                 if (entered && (target.controlMode == BaseVehicle.VehicleControlMode.localPlayer
                     || (player.IsSeated && ReferenceEquals(player.LockedEntity?.Parent, target))))
                 {
-                    if (!exitRequested) RequestExit(player);
+                    if (!exitRequested)
+                    {
+                        RequestExit(player);
+                        ReportCleanupWait("stock-exit-requested");
+                    }
+                    else ReportCleanupWait("waiting-for-stock-pilot-release");
+                    return;
+                }
+                if (player.CommandActivator == null || player.IsSeated || player.IsExitingSeat
+                    || player.CommandActivator.IsInEnterCommand)
+                {
+                    // Stock seat post-exit still owns the player's position until IsExitingSeat clears.
+                    ReportCleanupWait($"waiting-for-stock-dismount seated={player.IsSeated} exiting={player.IsExitingSeat}"
+                        + $" entered={player.CommandActivator?.IsInEnterCommand}");
                     return;
                 }
                 if (!target.IsInitialized) return;
                 if (target.IsLocalPlayerParent)
                 {
-                    if (!returnedPlayer && !player.IsSeated && !player.CommandActivator.IsInEnterCommand
-                        && player.SkyTransform.CurrentSystem.Equals(originalPlayerSystem))
+                    if (!returnedPlayer && player.SkyTransform.CurrentSystem.Equals(originalPlayerSystem))
                     {
                         player.SkyTransform.SetTransform(originalPlayerPose.systemPosition, originalPlayerPose.rotation);
                         returnedPlayer = true;
+                        ReportCleanupWait("returned-player-to-original-pose");
                     }
+                    else ReportCleanupWait(returnedPlayer ? "waiting-for-native-parent-release" : "player-system-changed");
                     return;
                 }
                 Require(target.EntityName == autoName && !target.saveInWorld && IsDetached(target)
@@ -115,6 +139,7 @@ namespace Sevo.Example.SublightControlProbe
                     "Cleanup refused a changed, occupied or attached grid.");
                 if (!target.WillBeUnspawned)
                     BlockEntityManager.instance.RemoveAndDestroy(target, removeFromLocationMapping: true);
+                ReportCleanupWait("stock-grid-removal-requested");
                 AdvanceTo(AutoStep.Removed);
                 return;
             }
@@ -188,6 +213,12 @@ namespace Sevo.Example.SublightControlProbe
                     AdvanceTo(AutoStep.Acquire, 35f);
                     break;
                 case AutoStep.Acquire:
+                    if (CombinedCameraRequested)
+                    {
+                        if (!AdvanceCombinedCamera(ship, target, player)) return;
+                        AdvanceTo(AutoStep.Cleanup);
+                        break;
+                    }
                     if (player.CommandActivator.IsInEnterCommand || player.IsSeated || player.IsExitingSeat
                         || !SublightControlService.TryAcquire(Id, target, out lease)) return;
                     Require(ship != null, "Stock drive disappeared before the pulse.");
@@ -281,6 +312,13 @@ namespace Sevo.Example.SublightControlProbe
                 && !PlayerState.SystemEntered && NetworkServer.active && NetworkServer.dontListen
                 && player != null && player.IsLocal && !player.Health.IsRespawning
                 && SaveManager.CharacterName == autoCharacter && BlockEntityManager.instance != null && SublightControlService.IsAvailable;
+
+        private void ReportCleanupWait(string reason)
+        {
+            if (cleanupWait == reason) return;
+            cleanupWait = reason;
+            Logger.LogInfo($"{Prefix} CLEANUP session={session} grid={autoKey} state={reason}");
+        }
 
         private void RequestExit(PlayerCommandManager player)
         {
