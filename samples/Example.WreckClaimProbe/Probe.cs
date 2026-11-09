@@ -23,14 +23,17 @@ public sealed class Probe : BaseUnityPlugin
     private const string Env = "SEVO_KEEL_WRECK_CLAIM_PROBE";
     private const string BlueprintName = "V27 Hotwing";
     private const string WreckName = "Keel Wreck Claim Fixture";
-    private enum Step { Off, CreateSource, DefeatSource, Stage, AwaitRetirement, AwaitReplacement, Reload }
+    private enum Step { Off, CreateSource, DefeatSource, Stage, AwaitRetirement, Recover, AwaitReplacement, Reload }
     private readonly Stopwatch deadline = new Stopwatch();
     private Step step;
     private ProfileSession profile = null!;
     private string session = "";
     private string sourceSession = "";
     private string character = "";
+    private string gameMode = "";
     private string stagedPath = "";
+    private string metadataPath = "";
+    private string snapshotPath = "";
     private string receiptPath = "";
     private string identity = "";
     private string readiness = "";
@@ -39,6 +42,9 @@ public sealed class Probe : BaseUnityPlugin
     private ParentEntity? source;
     private ParentEntity? replacement;
     private FileStream? fixtureLock;
+    private WreckRecoverySnapshot? snapshot;
+    private bool interruptAfterRetirement;
+    private bool stagedSurvivalPosition;
 
     private void Awake()
     {
@@ -46,10 +52,14 @@ public sealed class Probe : BaseUnityPlugin
         if (mode.Length == 0) return;
         try
         {
-            Require(mode is "stage" or "reload", "Unknown wreck probe mode.");
+            Require(mode is "stage" or "recover" or "reload", "Unknown wreck probe mode.");
             session = Read("SEVO_PLATFORM_SESSION");
             sourceSession = mode == "stage" ? session : Read(Env + "_SOURCE_SESSION");
             character = Read(Env + "_CHARACTER");
+            gameMode = Read(Env + "_GAME_MODE");
+            if (gameMode.Length == 0) gameMode = "creative";
+            Require(gameMode is "creative" or "survival", "Use Creative or Survival for the disposable fixture.");
+            interruptAfterRetirement = mode == "stage" && Read(Env + "_INTERRUPT") == "1";
             var game = Read(Env + "_GAME");
             var company = Read(Env + "_COMPANY");
             var product = Read(Env + "_PRODUCT");
@@ -77,9 +87,17 @@ public sealed class Probe : BaseUnityPlugin
             RejectReparse(lockPath);
             fixtureLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             stagedPath = Path.Combine(root, "fixture.sevo");
+            metadataPath = Path.Combine(root, "fixture.xml");
+            snapshotPath = Path.Combine(root, "snapshot.json");
             receiptPath = Path.Combine(root, "saved.txt");
-            if (mode == "reload") ReadReceipt();
-            Next(mode == "stage" ? Step.CreateSource : Step.Reload);
+            if (mode == "recover") ReadSnapshot();
+            if (mode == "reload")
+            {
+                var receipt = ReadReceipt();
+                star.seed = receipt.Star;
+                identity = receipt.Identity;
+            }
+            Next(mode == "stage" ? Step.CreateSource : mode == "recover" ? Step.Recover : Step.Reload);
         }
         catch (Exception error) { Fail(error); }
     }
@@ -120,24 +138,31 @@ public sealed class Probe : BaseUnityPlugin
                 source.SaveToDiskAtPath(stagedPath, isBlueprintExport: false);
                 VerifyNativeBody(stagedPath);
                 pose = new WorldTransform(source.TransformData);
+                VerifyNativeCharacterDirectory();
+                SaveManager.SaveOnSceneQuit();
+                Require(ReadNativeIndexCount() == 0, "The transient NPC unexpectedly already exists in the stock save index.");
+                RequireUnindexedBodyAbsent();
+                var position = pose.systemPosition;
+                var rotation = pose.rotation;
+                snapshot = new WreckRecoverySnapshot(profile.ProfileId, Guid.ParseExact(sourceSession, "N"), character, gameMode,
+                    star.seed, identity, (position.x, position.y, position.z), (rotation.x, rotation.y, rotation.z, rotation.w));
+                snapshot.Publish(snapshotPath, stagedPath, metadataPath);
                 BlockEntityManager.instance.RemoveAndDestroy(source, removeFromLocationMapping: true);
                 Next(Step.AwaitRetirement);
                 break;
             case Step.AwaitRetirement:
                 if (source != null || CountLive() != 0 || NPCManager.NpcEntities.Any(entry => ReferenceEquals(entry, source))) return;
-                VerifyNativeBody(stagedPath);
-                replacement = Dependency.PlayerManager.NetworkSetup.ServerLoadBlueprint(new EntityInstanceData
+                if (interruptAfterRetirement)
                 {
-                    entityName = WreckName,
-                    blueprintFullPath = stagedPath,
-                    npcBehavior = NpcSpaceshipCommon.Behavior.playerControllable,
-                    ownerPlayerNetID = Dependency.PlayerNetwork.netId,
-                    isNewInstance = false,
-                    saveInWorld = true,
-                    buildPermission = BuildPermission.canBeBuilt
-                }, pose, star);
-                Require(replacement != null, "Stock replacement spawn returned no entity.");
-                Next(Step.AwaitReplacement);
+                    Require(ReadNativeIndexCount() == 0, "The retired wreck unexpectedly has a native save entry.");
+                    Report("INTERRUPTED_PASS durable snapshot and zero live/saved replacements after source retirement");
+                    step = Step.Off;
+                    return;
+                }
+                SpawnReplacement();
+                break;
+            case Step.Recover:
+                RecoverReplacement();
                 break;
             case Step.AwaitReplacement:
                 if (replacement == null || !replacement.IsInitialized || !replacement.isDestroyed) return;
@@ -147,7 +172,8 @@ public sealed class Probe : BaseUnityPlugin
                 SaveManager.SaveOnSceneQuit();
                 VerifyNativeIndex();
                 WriteReceipt();
-                Report("STAGED_PASS source retired, same SGUID and destroyed state saved with one stock index entry");
+                Report((session == sourceSession ? "STAGED_PASS" : "RECOVERED_PASS")
+                    + " same SGUID and destroyed state saved with one stock index entry");
                 step = Step.Off;
                 break;
             case Step.Reload:
@@ -162,23 +188,89 @@ public sealed class Probe : BaseUnityPlugin
         }
     }
 
+    private void ReadSnapshot()
+    {
+        RejectReparse(snapshotPath);
+        RejectReparse(stagedPath);
+        RejectReparse(metadataPath);
+        snapshot = WreckRecoverySnapshot.Open(snapshotPath, profile.ProfileId, Guid.ParseExact(sourceSession, "N"),
+            character, gameMode, stagedPath, metadataPath);
+        identity = snapshot.Identity;
+        star.seed = snapshot.Star;
+        var p = snapshot.Position;
+        var q = snapshot.Rotation;
+        pose = new WorldTransform(new Vector3l(p.X, p.Y, p.Z), new Quaternion(q.X, q.Y, q.Z, q.W));
+    }
+
+    private void RecoverReplacement()
+    {
+        var current = PlanetarySystem.CurrentStarData;
+        Require(current.seed == snapshot!.Star, "The stock character loaded a different system from the snapshot.");
+        star = current;
+        var live = BlockEntityManager.Entities.Where(entity => entity != null
+            && string.Equals(entity.SGUID, identity, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        var saved = ReadNativeIndexCount();
+        Require(live.Length <= 1 && saved <= 1, "The fixture identity is duplicated in the world or save.");
+        if (live.Length == 1)
+        {
+            if (!live[0].IsInitialized) return;
+            Require(ReplacementMatches(live[0]), "The existing live identity does not match the player-owned wreck.");
+            snapshot.VerifyFiles(stagedPath, metadataPath);
+            if (saved == 1)
+                VerifyNativeBody(EntityInstanceSystem_mp.GetPlayerInstanceFullPath(character, identity), VerifyNativeCharacterDirectory());
+            else
+                RequireUnindexedBodyAbsent();
+            replacement = live[0];
+            Next(Step.AwaitReplacement);
+            return;
+        }
+        if (saved == 1) return; // An indexed replacement must load normally before recovery can finish.
+        RequireUnindexedBodyAbsent();
+        if (!IsClearPose(pose.systemPosition)) return;
+        SpawnReplacement();
+    }
+
+    private void SpawnReplacement()
+    {
+        VerifyNativeBody(stagedPath);
+        snapshot!.VerifyFiles(stagedPath, metadataPath);
+        replacement = Dependency.PlayerManager.NetworkSetup.ServerLoadBlueprint(new EntityInstanceData
+        {
+            entityName = WreckName,
+            blueprintFullPath = stagedPath,
+            npcBehavior = NpcSpaceshipCommon.Behavior.playerControllable,
+            ownerPlayerNetID = Dependency.PlayerNetwork.netId,
+            isNewInstance = false,
+            saveInWorld = true,
+            buildPermission = BuildPermission.canBeBuilt
+        }, pose, star);
+        Require(replacement != null, "Stock replacement spawn returned no entity.");
+        Next(Step.AwaitReplacement);
+    }
+
     private void SpawnTransientNpcFixture()
     {
         var player = Dependency.PlayerManager;
-        if (player.Health == null || player.Health.IsRespawning || GameIntroductionResources.instance?.Medbay?.inAnimation != false)
+        var intro = GameIntroductionResources.instance;
+        var medbay = intro?.Medbay;
+        if (player.Health == null || player.Health.IsRespawning
+            || (gameMode == "creative" ? medbay?.inAnimation != false : medbay?.inAnimation == true))
         {
-            readiness = "Waiting for stock medbay and player respawn.";
+            WaitFor("stock player and medbay state", $"respawning={player.Health?.IsRespawning} medbay={medbay != null} "
+                + $"medbayAnimating={medbay?.inAnimation} introductionPhase={intro?.missionPhase}");
             return;
         }
         star = PlanetarySystem.CurrentStarData;
         if (star.seed == 0 || player.SkyTransform.CurrentSystem != star || Dependency.PlayerNetwork.netId == 0)
         {
-            readiness = "Waiting for the same initialized system and local loader authority.";
+            WaitFor("initialized system and local loader authority");
             return;
         }
         if (!TryChooseClearPose(player))
         {
-            readiness = "The stock clearance test rejected the fixture positions.";
+            if (TryStageSurvivalPosition(player)) return;
+            WaitFor("stock clearance", $"introductionPhase={intro?.missionPhase} seated={player.IsSeated} "
+                + $"entered={PlayerState.SystemEntered} orbitStaged={stagedSurvivalPosition}");
             return;
         }
         Report("spawn-clearance PASS system=" + star.seed + " position=" + pose.systemPosition);
@@ -212,14 +304,39 @@ public sealed class Probe : BaseUnityPlugin
         foreach (var axis in axes)
         {
             var candidate = origin + new Vector3l(axis * distance);
-            if (PlanetarySystem.SolarBodies.Any(body => body.IsShipTooClose(candidate))
-                || SkyRigidbody.Entities.Any(other => other != null && !other.WillBeUnspawned && other.SkyTransform.CurrentSystem == star
-                    && (other.TransformData.systemPosition - candidate).Magnitude < 120f + other.ParentRadius))
-                continue;
+            if (!IsClearPose(candidate)) continue;
             pose = new WorldTransform(candidate, Quaternion.identity);
             return true;
         }
         return false;
+    }
+
+    private bool IsClearPose(Vector3l candidate)
+        => !PlanetarySystem.SolarBodies.Any(body => body.IsShipTooClose(candidate))
+            && !SkyRigidbody.Entities.Any(other => other != null && !other.WillBeUnspawned && other.SkyTransform.CurrentSystem == star
+                && (other.TransformData.systemPosition - candidate).Magnitude < 120f + other.ParentRadius);
+
+    private bool TryStageSurvivalPosition(PlayerCommandManager player)
+    {
+        if (gameMode != "survival" || stagedSurvivalPosition || player.IsSeated || player.IsExitingSeat
+            || PlayerState.SystemEntered || player.CommandActivator == null || player.CommandActivator.IsInEnterCommand
+            || GameIntroductionResources.instance is not { missionPhase: >= 1 })
+            return false;
+        var origin = player.TransformData.systemPosition;
+        var body = PlanetarySystem.SolarBodies.FirstOrDefault(candidate => candidate.IsShipTooClose(origin)
+            && candidate.AstronType != AstronType.star && candidate.AstronType != AstronType.gas);
+        if (body == null) return false;
+        var outward = Vector3l.Direction(origin, body.SystemPosition);
+        if (outward.sqrMagnitude < 0.9f) return false;
+        var candidatePosition = body.SystemPosition + new Vector3l(outward * (body.radius * 2.4f + 1200f));
+        if (!IsClearPose(candidatePosition)) return false;
+        // The stock intro can wait indefinitely for fresh starter terrain in the lab.
+        // Move only the explicitly selected disposable character, after stock sets its initial pose.
+        if (!player.IsHelmetOn) player.SetHelmetStatus(isHelmetOn: true);
+        player.SkyTransform.SetTransform(candidatePosition, player.TransformData.rotation);
+        stagedSurvivalPosition = true;
+        Report("SURVIVAL_FIXTURE_POSITION staged outside native terrain clearance in the same system");
+        return true;
     }
 
     private bool SourceIsEligible()
@@ -227,7 +344,7 @@ public sealed class Probe : BaseUnityPlugin
         if (source == null || source.SkyTransform.CurrentSystem != star || source.attachedNodeId != 0
             || source.saveInWorld || !source.Identity.IsNPC || !NPCManager.NpcEntities.Contains(source)
             || source.Identity.IsPlayerOwned || source.WillBeUnspawned || source.EntityMetaData.isWorldWreck
-            || source.Type != EntityType.spaceship || source.EntityName != WreckName || !IsFixtureIdentity(source.SGUID)
+            || source.Type != EntityType.spaceship || source.EntityName != WreckName || !WreckRecoverySnapshot.IsIdentity(source.SGUID)
             || source.IsLocalPlayerParent || source.Rigidbody.isParented || source.directDockedChildrens.Count != 0
             || source.EntityCrew.crews.Count != 0 || source.EntityCrew.npcCharactersIds.Count != 0
             || source.controlMode != BaseVehicle.VehicleControlMode.notControlled)
@@ -237,15 +354,16 @@ public sealed class Probe : BaseUnityPlugin
     }
 
     private bool ReplacementMatches(ParentEntity target)
-        => target.SGUID == identity && target.SkyTransform.CurrentSystem.seed == star.seed && CountLive() == 1
-            && target.Type == EntityType.spaceship && target.attachedNodeId == 0 && target.isDestroyed
+        => target.SGUID == identity && target.EntityName == WreckName && target.SkyTransform.CurrentSystem.seed == star.seed && CountLive() == 1
+            && target.Type == EntityType.spaceship && target.attachedNodeId == 0 && target.isDestroyed && !target.EntityMetaData.isWorldWreck
             && target.Identity.IsPlayerOwned && !target.Identity.IsNPC && target.saveInWorld
             && target.Identity.NpcBehavior == NpcSpaceshipCommon.Behavior.playerControllable
             && target.Sync.instanceData.ownerPlayerNetID == Dependency.PlayerNetwork.netId
             && target.Sync.instanceData.buildPermission == BuildPermission.canBeBuilt && target.BrickCount.totalBricks > 0
             && !NPCManager.NpcEntities.Any(entry => entry != null && entry.SGUID == identity);
 
-    private int CountLive() => BlockEntityManager.Entities.Count(entity => entity != null && entity.SGUID == identity);
+    private int CountLive() => BlockEntityManager.Entities.Count(entity => entity != null
+        && string.Equals(entity.SGUID, identity, StringComparison.OrdinalIgnoreCase));
 
     private void VerifyNativeBody(string path, string? trustedRoot = null)
     {
@@ -264,15 +382,40 @@ public sealed class Probe : BaseUnityPlugin
     private void VerifyNativeIndex()
     {
         var saveRoot = VerifyNativeCharacterDirectory();
-        var index = EntityInstanceSystem_mp.LoadFromDisk(PlanetarySystem.CurrentStarData, character, useInstallFolder: false);
-        Require(index != null && index.starData.seed == star.seed
-            && index.instances.Count(row => row.fileName == identity) == 1, "The stock index lacks one exact fixture entry.");
+        Require(ReadNativeIndexCount() == 1, "The stock index lacks one exact fixture entry.");
         VerifyNativeBody(EntityInstanceSystem_mp.GetPlayerInstanceFullPath(character, identity), saveRoot);
+    }
+
+    private int ReadNativeIndexCount()
+    {
+        var saveRoot = VerifyNativeCharacterDirectory();
+        Require(!PlayerSave_mp.Load_Legacy, "The disposable fixture requires the current stock save layout.");
+        var path = Path.Combine(Common.SkyApplication.Paths.SAVE_CHARACTER, character,
+            Common.SkyApplication.Paths.instances_path, PlanetarySystem.CurrentStarData.SaveString());
+        RejectReparse(path, saveRoot);
+        var index = EntityInstanceSystem_mp.LoadFromDisk(PlanetarySystem.CurrentStarData, character, useInstallFolder: false);
+        Require(index != null && index.starData.seed == star.seed, "The required stock index is missing or unreadable.");
+        return index!.instances.Count(row => string.Equals(row.fileName, identity, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void RequireUnindexedBodyAbsent()
+    {
+        var root = VerifyNativeCharacterDirectory();
+        var body = EntityInstanceSystem_mp.GetPlayerInstanceFullPath(character, identity);
+        var metadata = Path.ChangeExtension(body, ".xml");
+        RejectReparse(body, root);
+        RejectReparse(metadata, root);
+        Require(!File.Exists(body) && !File.Exists(metadata), "An unindexed body or metadata already exists for the fixture.");
     }
 
     private void WriteReceipt()
     {
-        var temporary = receiptPath + ".tmp";
+        if (File.Exists(receiptPath))
+        {
+            Require(ReadReceipt() == (star.seed, identity), "The prior fixture receipt describes another wreck.");
+            return;
+        }
+        var temporary = receiptPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         using (var writer = new StreamWriter(file))
         {
@@ -286,22 +429,23 @@ public sealed class Probe : BaseUnityPlugin
         File.Move(temporary, receiptPath);
     }
 
-    private void ReadReceipt()
+    private (ulong Star, string Identity) ReadReceipt()
     {
         RejectReparse(receiptPath);
         Require(new FileInfo(receiptPath).Length < 1024, "The stock fixture receipt is oversized.");
         var data = File.ReadAllLines(receiptPath);
         Require(data.Length == 4 && Guid.TryParse(data[0], out var owner) && owner == profile.ProfileId
-            && data[1] == character && ulong.TryParse(data[2], out _) && IsFixtureIdentity(data[3]), "The stock fixture receipt is invalid.");
-        star.seed = ulong.Parse(data[2]);
-        Require(star.seed != 0, "The stock fixture system is invalid.");
-        identity = data[3];
+            && data[1] == character && ulong.TryParse(data[2], out _) && WreckRecoverySnapshot.IsIdentity(data[3]), "The stock fixture receipt is invalid.");
+        ulong seed = ulong.Parse(data[2]);
+        Require(seed != 0, "The stock fixture system is invalid.");
+        return (seed, data[3]);
     }
 
     private bool WorldReady()
         => GameloopManager.IsMainThread && !GameloopManager.IsNativeContainerAccessUnsafe && !GameloopManager.jobStarted
             && !PlayerState.InLoadingScreen && !PlayerState.IsQuittingToDesktopOrTitle
-            && PlayerState.sessionMode == PlayerState.SessionMode.solo && PlayerState.gameMode == PlayerState.GameMode.creative
+            && PlayerState.sessionMode == PlayerState.SessionMode.solo
+            && PlayerState.gameMode == (gameMode == "survival" ? PlayerState.GameMode.survival : PlayerState.GameMode.creative)
             && NetworkServer.active && NetworkServer.dontListen && Dependency.PlayerManager != null
             && Dependency.PlayerManager.IsLocal && Dependency.PlayerNetwork != null
             && SaveManager.CharacterName == character && BlockEntityManager.instance != null;
@@ -318,9 +462,6 @@ public sealed class Probe : BaseUnityPlugin
         return persistent;
     }
 
-    private static bool IsFixtureIdentity(string? value)
-        => value is { Length: > 0 and < 100 } && value.All(c => char.IsLetterOrDigit(c) || c is '-' or '_');
-
     private static void RejectReparse(string path, string? trustedRoot = null)
     {
         if (trustedRoot != null)
@@ -333,7 +474,14 @@ public sealed class Probe : BaseUnityPlugin
     }
 
     private static string Read(string name) => Environment.GetEnvironmentVariable(name) ?? "";
-    private void Next(Step next) { step = next; deadline.Restart(); Report("stage=" + next); }
+    private void Next(Step next) { step = next; readiness = ""; deadline.Restart(); Report("stage=" + next); }
+    private void WaitFor(string condition, string details = "")
+    {
+        var reason = details.Length == 0 ? condition : condition + " " + details;
+        if (reason == readiness) return;
+        readiness = reason;
+        Report("WAIT " + reason);
+    }
     private void Report(string text) => Logger.LogInfo($"{Prefix} session={session} sguid={identity} {text}");
     private void Fail(Exception error) { Logger.LogError($"{Prefix} FAIL session={session} stage={step} {error}"); step = Step.Off; }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

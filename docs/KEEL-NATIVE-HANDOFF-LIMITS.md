@@ -1,6 +1,6 @@
 # Native camera and grid ownership handoff
 
-The investigation used the private native references for Steam build 26451593 / 26w45a. These are static findings.
+The investigation used the private native references for Steam build 26451593 / 26w45a. Rendered runtime evidence is called out separately.
 
 ## Remote camera
 
@@ -12,4 +12,6 @@ The native client authority call assigns simulation authority. Persistent owner 
 
 The stock saved-instance loader can create a player-controllable object with an existing persistent grid key. A replacement transaction needs to record provenance, stage the ordinary instance, retire the source through stock cleanup, and verify unique identity after reload. For terrain-generated wrecks, the source-node save and replacement-instance save are independent writes, so interruption and retry require explicit recovery. The native ownership predicate also excludes grids with world-wreck metadata. Claiming a generated wreck therefore needs a validated metadata transition and durable retirement of the source node. Keel's existing grid recovery contract revives an eligible defeated player-owned grid through the stock recovery transition.
 
-The [disposable wreck probe](../samples/Example.WreckClaimProbe/README.md) exercised the ordinary replacement path in a rendered solo profile. It retired one fixture-owned transient NPC source and loaded a defeated player-owned grid with the same persistent key. A fresh process found one live grid and one stock save entry with that key. A public claim contract still needs recovery from interruption and durable retirement for sources with their own respawn rules.
+The disposable wreck probe exercised the ordinary replacement path in rendered Creative and Survival solo profiles. Creative saved and reloaded a defeated player-owned grid under the source's exact key. Survival moved only the disposable character to clear orbit, deliberately stopped after retirement, recovered grid `6DAECC26-ADF3E` from the staged body and metadata in a second process, and verified one live grid and one stock save entry in a third process. [Wreck probe sessions and checks](../samples/Example.WreckClaimProbe/README.md#runtime-evidence)
+
+The deliberate interruption took place before any replacement save. The native body and system index are separate writes, and the probe stops if it sees an unindexed body. Terrain-generated wrecks can also respawn from the node when their stock body fails to load. A public claim contract still needs verified recovery across these transitions, durable retirement for respawning sources, and preservation checks for more complex grids.
