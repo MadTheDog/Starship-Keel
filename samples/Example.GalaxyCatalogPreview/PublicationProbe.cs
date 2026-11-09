@@ -29,6 +29,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
         private const ulong AuthoredStarSeed = 987654321;
         private string? publicationMode;
         private string? publicationAction;
+        private PlayerState.GameMode publicationGameMode;
         private string? publicationState;
         private bool publicationStarted;
         private bool publicationFailed;
@@ -55,6 +56,12 @@ namespace Sevo.Example.GalaxyPreviewProbe
                 Require(Guid.TryParseExact(session, "N", out _) && publicationState != null, "A managed launcher session is required.");
                 ProfileProtocol.Open(publicationState!, BepInEx.Paths.GameRootPath, session);
                 publicationAction = Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_PUBLICATION_ACTION") ?? "create";
+                publicationGameMode = Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_PROBE_GAME_MODE") switch
+                {
+                    null or "creative" => PlayerState.GameMode.creative,
+                    "survival" => PlayerState.GameMode.survival,
+                    _ => throw new InvalidOperationException("Unknown publication probe game mode.")
+                };
                 Require(publicationAction is "create" or "load" or "reject-create" or "reject-load" or "cancel-create"
                     or "disable-create" or "stock-create",
                     "Unknown publication probe action.");
@@ -166,7 +173,9 @@ namespace Sevo.Example.GalaxyPreviewProbe
                 Read<InputField>(form!, "inputSeed").text = TestSeed;
                 form!.OnInput();
                 form.OnSeedUpdated();
-                if (!Read<bool>(form, "isCreative")) form.OnGameModeButton();
+                bool creative = publicationGameMode == PlayerState.GameMode.creative;
+                if (Read<bool>(form, "isCreative") != creative) form.OnGameModeButton();
+                Require(Read<bool>(form, "isCreative") == creative, "The stock character form did not select the requested mode.");
                 Require(!Read<bool>(form, "isInvalid"), "The stock character form rejected the fixture.");
                 if (cancel)
                 {
@@ -218,8 +227,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
                 || LoadManager.AreJobRemaining || PlanetarySystem.InSystemTransition || PlanetarySystem.currentSystem == null
                 || Dependency.PlayerManager == null || Dependency.PlayerManager.Health == null || GameloopManager.jobStarted
                 || Dependency.PlayerManager.Health.IsDead || Dependency.PlayerManager.Health.IsRespawning
-                || (create && (!ReferenceEquals(Dependency.PlayerManager.Health, initialRespawnHealth)
-                    || Time.frameCount <= initialRespawnFrame || GameIntroductionResources.instance?.Medbay?.inAnimation != false)))
+                || (create && !InitialCharacterIsReady()))
                 yield return null;
 
             var catalog = AssetRepoGalaxy.Distribution;
@@ -262,10 +270,11 @@ namespace Sevo.Example.GalaxyPreviewProbe
             if (create) SaveManager.SaveOnSceneQuit();
             var saved = PlayerSave_mp.LoadFromDisk(file);
             Require(saved != null && saved.characterName == TestCharacter && saved.seed == LongHash.StringToSeed(TestSeed)
-                && saved.starData == PlanetarySystem.CurrentStarData, "Stock save/reload did not preserve the character and system identities.");
+                && saved.starData == PlanetarySystem.CurrentStarData && saved.gameMode == publicationGameMode,
+                "Stock save/reload did not preserve the character, mode and system identities.");
             ObserveBindings(catalog, "published-system");
             Logger.LogInfo($"KEEL_GALAXY_PUBLICATION_PROBE PASS action={publicationAction} catalog={publicationMode}"
-                + $" stars={catalog.StarDatas.Count} routes={AssetRepoGalaxy.WarpGateRoutes.StartToEnd.Count} current={saved!.starData.seed}");
+                + $" mode={saved!.gameMode} stars={catalog.StarDatas.Count} routes={AssetRepoGalaxy.WarpGateRoutes.StartToEnd.Count} current={saved.starData.seed}");
         }
 
         private void StartPublicationHarness(string root, bool gameplayDiagnostics)
@@ -275,7 +284,7 @@ namespace Sevo.Example.GalaxyPreviewProbe
             publicationHarness = new Harmony(DiagnosticOwner + ".stock-respawn");
             publicationHarness.Patch(AccessTools.DeclaredMethod(typeof(Paths), nameof(Paths.Initialize), Type.EmptyTypes),
                 postfix: new HarmonyMethod(typeof(Plugin), nameof(AfterNativePathInitialization)) { priority = Priority.Last });
-            if (!gameplayDiagnostics) return;
+            if (!gameplayDiagnostics || publicationGameMode != PlayerState.GameMode.creative) return;
             var tutorial = AccessTools.DeclaredMethod(typeof(GameIntroductionResources.GameIntroductionLogic),
                 "UpdateCreativeTutorial", Type.EmptyTypes) ?? throw new MissingMethodException("The stock Creative tutorial seam is missing.");
             publicationHarness.Patch(tutorial, prefix: new HarmonyMethod(typeof(Plugin), nameof(AllowCreativeTutorial)));
@@ -291,7 +300,22 @@ namespace Sevo.Example.GalaxyPreviewProbe
 
         private bool IsPublicationCharacter() => SaveManager.CharacterName == TestCharacter
             && publicationSaveRoot != null && string.Equals(Paths.SAVE_CHARACTER, publicationSaveRoot, StringComparison.Ordinal)
-            && PlayerState.sessionMode == PlayerState.SessionMode.solo && PlayerState.gameMode == PlayerState.GameMode.creative;
+            && PlayerState.sessionMode == PlayerState.SessionMode.solo && PlayerState.gameMode == publicationGameMode;
+
+        private bool InitialCharacterIsReady()
+        {
+            var intro = GameIntroductionResources.instance;
+            if (publicationGameMode == PlayerState.GameMode.survival)
+            {
+                bool stagedTransit = Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_GATE_TRANSIT_PROBE") == "1"
+                    && Environment.GetEnvironmentVariable("SEVO_KEEL_GALAXY_GATE_TRANSIT_AUTO") == "1"
+                    && Path.GetFileName(publicationState)?.StartsWith("gate-transit-", StringComparison.Ordinal) == true;
+                return intro?.missionPhase >= (stagedTransit ? 1 : 4);
+            }
+
+            return ReferenceEquals(Dependency.PlayerManager.Health, initialRespawnHealth)
+                && Time.frameCount > initialRespawnFrame && intro?.Medbay?.inAnimation == false;
+        }
 
         private static void AfterNativePathInitialization()
         {

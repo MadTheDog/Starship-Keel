@@ -23,6 +23,6 @@ Set `SEVO_KEEL_EXPERIMENTAL_GALAXY_CATALOG=1`. Start a fresh process for each ro
 | `authored` | `disable-create` | In a separate empty managed profile with publication enabled at launch, the sample disables publication before character entry. The remaining guard refuses the marked root without changing the catalog or save. |
 | `missing` | `stock-create` | In a separate empty disposable profile, omit the native save-root marker. Stock character creation and save proceed with the original asset references and no pin or lease. |
 
-Look for `KEEL_GALAXY_PUBLICATION_PROBE PASS`. The fixture waits for the starting system and player to settle before saving. It exercises native gate lookup in both directions. Flying through the physical gate requires a separate player test.
+Look for `KEEL_GALAXY_PUBLICATION_PROBE PASS`. The fixture waits for the starting system and player to settle before saving. It exercises native gate lookup in both directions. Flying through the physical gate requires a separate transit test. Set `SEVO_KEEL_GALAXY_PROBE_GAME_MODE=survival` to create or check a Survival character through the same stock entry flow. Creative remains the sample default. [Current galaxy verification status](../../docs/KEEL-GALAXY-CATALOG-PREVIEW.md)
 
 Use `SEVO_KEEL_GALAXY_PROBE_DRAIN=1` in a rendered lab if the known stock end-of-frame job stall prevents progress. The sample also defers phase zero of the Creative tutorial for its exact test character and save root so the lab can observe the normal initial respawn. Both are sample-only diagnostics.

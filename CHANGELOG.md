@@ -45,6 +45,7 @@
 - Verified simultaneous camera follow and sublight input, then stock pilot re-entry, exit and exact grid cleanup.
 - Verified native destination loading and fresh-process character reload reproduce the same appended planet and moon layout.
 - Verified a stock ship under native thrust crossed a published galaxy gate route, cleared the generated destination gate, and saved the destination star.
+- Verified that stock Survival character creation publishes an authored galaxy catalog and resolves its gate route in both directions. The native save retained the Survival mode.
 - Verified a disposable ordinary NPC wreck handoff. The test retired its source and restored a single player-owned wreck with the same persistent ID and defeat state after a fresh-process reload.
 - Verified recovery from a deliberate stop after removing an ordinary NPC wreck in Survival. A new process restored the staged wreck and a third launch found exactly one live wreck and one stock save entry with the original identity.
 
