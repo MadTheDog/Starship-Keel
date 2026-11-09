@@ -17,4 +17,16 @@ The [manual probe](../../docs/KEEL-MECHANISM-PATHS.md) binds stock sliders tagge
 3. Enter the fresh world and leave the fixture alone. It creates a small, separate grid about 25 metres above the player. It selects only its own slider placement before the stock builder creates the child, links a stock Switch, and uses that Switch to drive the stock carriage out and back. It leaves the grid in the disposable world.
 4. Filter the isolated BepInEx log for `KEEL_MECHANISM_PATH|<SEVO_PLATFORM_SESSION>|`. Require the ordered stages `bound`, `outbound`, `returned`, and `pass`. The outbound record must give both offsets equal to half the bound travel within 0.002 m. Both returned offsets must be within 0.002 m of zero. Both movement records must report `facing=fixed;legs=2`. Any `fail` or missing stage requires inspection.
 
-The fixture samples the live native child transform over successive rendered frames and checks both orthogonal legs, return travel, fixed rotation and the original travel plane. Use the manual probe for obstacle response, stock comparison, and disk reconstruction.
+The fixture samples the live native child transform over successive rendered frames and checks both orthogonal legs, return travel, fixed rotation and the original travel plane. Use the manual probe for stock comparison and disk reconstruction.
+
+## Optional obstruction fixture
+
+Set `SEVO_KEEL_MECHANISM_PATH_FIXTURE_OBSTRUCTION=1` along with the variables above. Use a fresh disposable character whose name ends in a dash and the first eight characters of `SEVO_PLATFORM_SESSION`. The lab's solo server must run in `dontListen` mode.
+
+The fixture waits for a settled player and a clear site in the active star. It adds a stock hull payload to the moving child and verifies baseline out-and-back travel before placing a stock hull obstacle on the slider's parent grid. The obstacle is wider than the payload across the second leg, so the native surface points can enter the obstacle beyond the stock penetration threshold.
+
+Require `bound`, `outbound`, `returned`, `blocked`, `resumed`, and `pass` in order. The `blocked` record must report native penetration above 0.015 m, one native movement-finished event, a restored intermediate state and fixed facing. The fixture checks the restored pose remains stable, removes the exact obstacle through the stock builder, and retries the path. Successful cleanup removes the obstacle. As in the original fixture, the rest of the test grid remains in the disposable world. Use a fresh world after a failed run.
+
+The `site` and `obstacle` records identify the native star, collider IDs and placed bounds. The `native-stop` record captures the actual stop even if the rollback assertions fail. An `obstacle-timeout` record includes sampled travel, matching active native queries, peak penetration and minimum distance between collider centers.
+
+Rendered obstruction acceptance on Steam build ID 26451593 / 26w45a passed in session `9cccd8c73abd44fa98c0670167aa90c7`. The stock collision reached 0.0162 m penetration and emitted one native stop. The fixed-facing carriage held at (1.000, 0.505) on the second leg, then resumed after the exact obstacle was removed.
