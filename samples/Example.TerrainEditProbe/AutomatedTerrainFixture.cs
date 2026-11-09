@@ -130,7 +130,9 @@ namespace Sevo.Example.TerrainEditProbe
                     case AutoPhase.FindGround:
                         Vector3 approach = PositionManager.ToWorldPosition(site);
                         Vector3 approachUp = (approach - centre).normalized;
-                        Vector3 highOrigin = approach + ScanOffset(approachUp, scanIndex++ % 49, 100f);
+                        int ring = scanIndex++ % 97;
+                        int offsetIndex = ring == 0 ? 0 : 1 + (ring - 1) % 48;
+                        Vector3 highOrigin = approach + ScanOffset(approachUp, offsetIndex, ring <= 48 ? 250f : 1000f);
                         float range = Mathf.Clamp(planet.radius * 0.15f, 100f, 50000f);
                         if (!RayDry(highOrigin, approachUp, range, out var ground, out _)) return;
                         site = ground.SystemPosition;
@@ -145,7 +147,7 @@ namespace Sevo.Example.TerrainEditProbe
                     case AutoPhase.FindPatch:
                         Vector3 origin = PositionManager.ToWorldPosition(site) + 12f * up + ScanOffset(up, scanIndex++ % 49, 4f);
                         if (!RayDry(origin, up, RayDistance, out var hit, out var node)
-                            || hit.distance < 2f || hit.distance > 17f || Vector3.Dot(hit.WorldNormal, up) < 0.85f
+                            || hit.distance < 2f || hit.distance > 17f || Mathf.Abs(Vector3.Dot(hit.WorldNormal, up)) < 0.85f
                             || !IsInterior(node, hit.localPoint) || !TryRead(hit, out _, out var before)) return;
                         measurementOrigin = PositionManager.ToSystemPosition(origin);
                         tree = node.treeGuid;
@@ -167,10 +169,11 @@ namespace Sevo.Example.TerrainEditProbe
         {
             hit = default;
             node = default;
-            var ray = new VoxelRaycast { includeWater = true };
+            var ray = new VoxelRaycast();
             var table = OctreeNodeResources.OctreeNodeDatas;
             if (!table.IsCreated || !ray.Raycast(origin, -outward, out hit, range)
-                || hit.type != VoxelRaycastHit.Type.newTerrain || hit.elementId <= 0 || hit.elementId >= table.Length)
+                || hit.type != VoxelRaycastHit.Type.newTerrain || hit.elementId <= 0 || hit.elementId >= table.Length
+                || PlanetCommon.IsUnderwater(hit.SystemPosition))
                 return false;
             node = table[hit.elementId];
             return node.planetGenerationId == planetId && node.transformId == hit.transformId
