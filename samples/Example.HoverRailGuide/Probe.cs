@@ -9,7 +9,7 @@ namespace Sevo.Example.HoverRailGuide
 {
     [BepInPlugin(Id, "Keel Hover Rail Guidance Probe", "0.1.0")]
     [BepInDependency(Plugin.Id)]
-    public sealed class Probe : BaseUnityPlugin
+    public sealed partial class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.hoverrail";
         private readonly List<RailMarker> rails = new List<RailMarker>();
@@ -23,6 +23,7 @@ namespace Sevo.Example.HoverRailGuide
             ContentRegistration.RegisterFunctionalBlock(Id, "pod", 1, "Probe Guide Pod", () => TabHull.HULL_A,
                 context => new GuidePod(this, context));
             GridPhysicsStep.Register(Id, "guidance", Guide);
+            PrepareFixture();
         }
 
         private void RegisterMarker(string name, string label, int turn)
@@ -34,7 +35,11 @@ namespace Sevo.Example.HoverRailGuide
             foreach (var pod in pods) pod.Guide(step);
         }
 
-        private void Observe(string message) => Logger.LogInfo("KEEL_HOVER_RAIL " + message);
+        private void Observe(string message)
+        {
+            Logger.LogInfo("KEEL_HOVER_RAIL " + message);
+            RecordFixtureObservation(message);
+        }
 
         private sealed class RailMarker : FunctionalBlockBehavior
         {
@@ -178,13 +183,14 @@ namespace Sevo.Example.HoverRailGuide
 
                 var currentRail = selected;
                 var currentGuide = guide;
+                float handoffMargin = previous == null ? 0f : 0.0025f * currentRail.Unit * currentRail.Unit;
                 foreach (var marker in probe.rails)
                 {
                     if (ReferenceEquals(marker, previous) || !marker.TryRead(out var rail)
                         || ReferenceEquals(rail.Grid, grid)) continue;
                     var candidate = rail.Project(podPoint);
                     float candidateDistance = (candidate.Point - podPoint).sqrMagnitude;
-                    if (candidateDistance >= distance || (previous != null
+                    if (candidateDistance + handoffMargin >= distance || (previous != null
                         && !currentRail.ConnectsNear(rail, currentGuide.Point, candidate.Point))) continue;
                     best = marker;
                     selected = rail;
