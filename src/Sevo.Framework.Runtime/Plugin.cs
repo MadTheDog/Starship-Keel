@@ -99,6 +99,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult shipyardAssemblyEligibility;
                 CapabilityResult transferLinks;
                 CapabilityResult gridPhysics;
+                CapabilityResult sublightControl;
                 CapabilityResult mechanismPaths;
                 CapabilityResult gridAttachments;
                 CapabilityResult gridDestruction;
@@ -162,6 +163,7 @@ namespace Sevo.Framework.Runtime
                     shipyardAssemblyEligibility = ContractAudit.EvaluateShipyardAssemblyEligibility(metadata.MainModule);
                     transferLinks = ContractAudit.EvaluateTransferLinks(metadata.MainModule);
                     gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
+                    sublightControl = ContractAudit.EvaluateSublightControl(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
                     gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
                     gridDestruction = ContractAudit.EvaluateGridDestruction(metadata.MainModule);
@@ -403,6 +405,13 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(gridPhysics,
                         patches => GridPhysicsStep.Install(patches, message => Logger.LogWarning(message)),
                         GridPhysicsStep.Disable));
+                if (sublightControl.Available && !gridPhysics.Available)
+                    sublightControl = new CapabilityResult(sublightControl.Name, false, "Requires the grid physics hook.");
+                sublightControl = InstallContentHook(sublightControl, "EnableSublightControl", "SUBLIGHT_CONTROL", () =>
+                {
+                    SublightControlService.Enable(message => Logger.LogWarning(message));
+                    return sublightControl;
+                }, SublightControlService.Disable);
                 mechanismPaths = InstallContentHook(mechanismPaths, "EnableMechanismPaths", "MECHANISM_PATHS",
                     () => InstallContentHookPatches(mechanismPaths,
                         patches => MechanismPathProvider.Install(patches, message => Logger.LogWarning(message)),
@@ -452,7 +461,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainRadialPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainRadialPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);

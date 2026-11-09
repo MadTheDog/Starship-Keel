@@ -26,7 +26,7 @@ The probe requires a loaded Creative solo session with the lab's Mirror server i
 5. Move back within reach of the native pilot controls. Press **F8**, then use the stock controls to reenter within 15 seconds. The probe submits neutral input while awaiting entry and verifies the old lease stops accepting input after the native pilot takes control. Fly briefly under ordinary input and exit normally.
 6. Retain the BepInEx log and session runtime status. A completed run emits `KEEL_SUBLIGHT_CONTROL_PROBE` with a final `PASS` line, and failures log their exact stage. Restart the lab to repeat the sequence.
 
-Manual mode uses the ship supplied by the operator. Both modes measure a short forward-velocity response and check lease arbitration. Rotation, fuel consumption, multiplayer, and reload need separate tests. The sample has been compiled against Steam build ID 26451593 / 26w45a. Rendered acceptance is pending.
+Manual mode uses the ship supplied by the operator. Both modes measure a short forward-velocity response and check lease arbitration. The automated fixture passed on Steam build 26451593 / 26w45a. Manual re-entry, expiry, rotation, fuel consumption, multiplayer, and reload need separate tests.
 
 ## Automated Hotwing fixture
 
