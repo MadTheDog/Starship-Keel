@@ -21,6 +21,8 @@ namespace Sevo.Example.TerrainEditProbe
         private bool autoPending;
         private float autoDeadline;
         private float nextAttempt;
+        private float nextStatus;
+        private int safeSteps;
         private int scanIndex;
         private int planetId;
         private Vector3l site;
@@ -68,6 +70,13 @@ namespace Sevo.Example.TerrainEditProbe
             }
             if (autoArmed && Time.realtimeSinceStartup > autoDeadline)
                 FinishAutomation(false, "timed_out_" + autoPhase);
+            if (autoArmed && autoPhase != AutoPhase.Approach && Time.realtimeSinceStartup >= nextStatus)
+            {
+                nextStatus = Time.realtimeSinceStartup + 10f;
+                Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} phase={autoPhase} safeSteps={safeSteps}"
+                    + $" loading={PlayerState.InLoadingScreen} systemEntered={PlayerState.SystemEntered} menu={PlayerState.InMenu}"
+                    + $" respawning={Dependency.PlayerManager?.Health.IsRespawning}");
+            }
         }
 
         private void FinishAutomation(bool accepted, string detail)
@@ -86,10 +95,13 @@ namespace Sevo.Example.TerrainEditProbe
                 || PlayerState.InLoadingScreen || PlayerState.IsQuittingToDesktopOrTitle
                 || PlayerState.SystemEntered || PlayerState.InMenu
                 || PlayerState.sessionMode != PlayerState.SessionMode.solo || PlayerState.gameMode != PlayerState.GameMode.creative
-                || !NetworkServer.active || !NetworkServer.dontListen || GameIntroductionResources.instance?.Medbay?.inAnimation != false
+                || !NetworkServer.active || !NetworkServer.dontListen
                 || Dependency.PlayerManager == null || !Dependency.PlayerManager.isLocalPlayer
                 || Dependency.PlayerManager.Health.IsRespawning)
                 return;
+            if (autoPhase == AutoPhase.Approach && GameIntroductionResources.instance?.Medbay?.inAnimation != false)
+                return;
+            safeSteps++;
 
             try
             {
@@ -177,7 +189,7 @@ namespace Sevo.Example.TerrainEditProbe
         {
             hit = default;
             node = default;
-            var ray = new VoxelRaycast();
+            var ray = new VoxelRaycast { includePlayer = false };
             var table = OctreeNodeResources.OctreeNodeDatas;
             if (!table.IsCreated || !ray.Raycast(origin, -outward, out hit, range)
                 || hit.type != VoxelRaycastHit.Type.newTerrain || hit.elementId <= 0 || hit.elementId >= table.Length
