@@ -17,11 +17,13 @@ namespace Sevo.Example.SeatInteractionProbe
             var right = Config.Bind("Probe", "RightFoot", new Vector3(0.48f, 0.12f, -0.18f), "Seat-local right foot position.");
             var exit = Config.Bind("Probe", "Exit", new Vector3(1.3f, 0.8f, 0.4f), "Seat-local exit capsule center.");
             SeatedPoseTargetProvider.Register(Id, "foot-pose", context =>
-                context.Seat.GetTagLabel("") == seatLabel.Value ? new SeatedFootTargets(left.Value, right.Value) : null);
+                TrySelectFootFixture(context, out var feet) ? feet
+                    : context.Seat.GetTagLabel("") == seatLabel.Value ? new SeatedFootTargets(left.Value, right.Value) : null);
             DismountPoseProvider.Register(Id, "exit", context =>
                 TrySelectFixtureExit(context, out var candidate) ? candidate
                     : context.Seat.GetTagLabel("") == seatLabel.Value ? exit.Value : (Vector3?)null);
             PrepareDismountFixture();
+            PrepareFootFixture();
         }
     }
 }

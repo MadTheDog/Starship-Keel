@@ -66,12 +66,14 @@ namespace Sevo.Example.SeatInteractionProbe
 
         private void OnDestroy()
         {
+            DisposeFootFixture();
             if (ReferenceEquals(activeFixture, this)) activeFixture = null;
             fixtureHarmony?.UnpatchSelf();
         }
 
         private void Update()
         {
+            UpdateFootFixture();
             if (!pendingFixture) return;
             if (fixtureDeadline == 0f) fixtureDeadline = Time.realtimeSinceStartup + 100f;
             if (Time.realtimeSinceStartup > fixtureDeadline)
