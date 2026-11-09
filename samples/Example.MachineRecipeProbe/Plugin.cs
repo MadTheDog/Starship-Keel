@@ -20,7 +20,7 @@ namespace Sevo.Example.MachineRecipeProbe
 {
     [BepInPlugin(Owner, "Keel Machine Recipe Probe", "0.1.0")]
     [BepInDependency(Sevo.Framework.Runtime.Plugin.Id, "0.1.8")]
-    public sealed class Plugin : BaseUnityPlugin
+    public sealed partial class Plugin : BaseUnityPlugin
     {
         private const string Owner = "example.keel-machines";
         private const string Dust = Owner + ":dust";
@@ -61,7 +61,7 @@ namespace Sevo.Example.MachineRecipeProbe
                 ore.id = (int)WorldPropCommon.WorldPropId.rockSmallA;
                 ore.quantity = 1f;
                 dust = Item(Dust, 3f);
-                return new MachineRecipeDefinition(MachineKind.Furnace, CraftSeconds, ore, dust);
+                return new MachineRecipeDefinition(MachineKind.Furnace, WorkRateRequested ? WorkRateCraftSeconds : CraftSeconds, ore, dust);
             });
             MachineRecipeRegistration.Register(Owner, "press_dust", 1, () =>
             {
@@ -269,6 +269,13 @@ namespace Sevo.Example.MachineRecipeProbe
                 var wornBit = ItemInstanceResources.GetItemData(CrusherCommandData.datas[crusherId].drillBitItemId);
                 Require(wornBit.id == drill.id && wornBit.damage > drill.damage, "Stock crushing did not wear the installed drill bit.");
                 Logger.LogInfo($"KEEL_MACHINE_PROBE CHAIN PASS ore={ore.quantity} dust={dust.quantity} pellet={pellet.quantity} drillWear={wornBit.damage:F1} session={session}");
+
+                if (WorkRateRequested)
+                {
+                    var workRate = ExerciseWorkRate(timer, unit, furnaceId);
+                    try { while (workRate.MoveNext()) yield return workRate.Current; }
+                    finally { (workRate as IDisposable)?.Dispose(); }
+                }
 
                 if (Environment.GetEnvironmentVariable("SEVO_KEEL_MACHINE_PROBE_CONVEYOR") == "1")
                 {

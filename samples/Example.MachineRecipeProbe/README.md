@@ -9,3 +9,9 @@ Set `SEVO_KEEL_MACHINE_PROBE_CONVEYOR=1` to run the extra conveyor phase. The fu
 Set `SEVO_KEEL_MACHINE_PROBE_ROUNDTRIP=1` to serialize the fixture in memory with a crusher recipe in progress. The reconstructed fixture must retain the committed outputs, drill wear and in-flight input, with zero recipe progress and no pending output. It must then finish the restarted recipe once.
 
 The log reports `KEEL_MACHINE_PROBE POWER PASS`, `FURNACE PASS`, `CHAIN PASS`, and the optional `CONVEYOR PASS` and `ROUNDTRIP PASS`. `KEEL_MACHINE_PROBE PASS` marks the end of the run. The first error logs `KEEL_MACHINE_PROBE FAIL` with the fixture stage. Discard the lab save afterward.
+
+## Optional furnace work-rate check
+
+Set SEVO_KEEL_MACHINE_PROBE_WORK_RATE=1 in the dedicated connector lab, with the machine recipe, block assembly and machine work-rate hooks enabled. The probe runs its ordinary ore-to-pellet chain, then feeds matching ore to two powered Arc Furnaces on the same stock grid. It binds a physical hull module to one furnace and checks that its native progress advances at twice the control rate.
+
+The probe deletes the module through the stock builder. It requires the live assembly to become incomplete, both furnaces to retain their earned progress, and their subsequent progress increments to match. Each furnace must consume one input and commit the exact custom output without a stock ingot. Look for WORK_RATE BOOST, WORK_RATE REVERT, and WORK_RATE PASS in the KEEL_MACHINE_PROBE log.
