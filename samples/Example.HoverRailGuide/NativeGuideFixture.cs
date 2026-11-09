@@ -22,7 +22,10 @@ namespace Sevo.Example.HoverRailGuide
         private ParentEntity? fixtureTrack;
         private BrickCoord fixturePodMarker;
         private BrickCoord fixtureTrackMarker;
+        private BrickCoord fixtureContinuation;
         private bool fixtureDrive;
+        private bool fixtureCurve;
+        private bool fixtureFollowedCurve;
         private bool fixtureCaptured;
         private bool fixtureHandedOff;
         private bool fixtureReleased;
@@ -49,6 +52,7 @@ namespace Sevo.Example.HoverRailGuide
                         Path.GetFullPath(Paths.GameRootPath).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase),
                     "The probe requires a verified disposable game and managed profile.");
                 fixtureProfile = ProfileProtocol.Open(state!, Paths.GameRootPath, session!);
+                fixtureCurve = Environment.GetEnvironmentVariable(FixtureFlag + "_CURVE") == "1";
                 GridPhysicsStep.Register(Id, "fixture-propulsion", PropelFixture);
             }
             catch (Exception exception) { Logger.LogError("KEEL_HOVER_RAIL FAIL " + exception.Message); }
@@ -57,7 +61,10 @@ namespace Sevo.Example.HoverRailGuide
         private void Update()
         {
             var profile = fixtureProfile;
-            if (profile == null || !WorldReady() || !GridPhysicsStep.IsAvailable || !WorldSurfaceQuery.IsAvailable) return;
+            if (profile == null || !WorldReady() || !GridPhysicsStep.IsAvailable || !WorldSurfaceQuery.IsAvailable
+                || PlayerState.SystemEntered || PlayerState.InMenu || Dependency.PlayerManager.Health.IsRespawning
+                || GameIntroductionResources.instance?.Medbay?.inAnimation != false)
+                return;
             fixtureProfile = null;
             StartCoroutine(RunFixture(BuildAndTest(profile)));
         }
@@ -94,13 +101,13 @@ namespace Sevo.Example.HoverRailGuide
         {
             var player = Dependency.PlayerManager;
             var origin = new WorldTransform(player.TransformData);
-            origin.systemPosition += new Vector3l(35f * Vector3.up);
+            origin.systemPosition += new Vector3l(80f * Vector3.up);
             var straight = Definition(profile, "straight").PreviewBrickData;
             var pod = Definition(profile, "pod").PreviewBrickData;
             var switchData = TabLogic.SWITCH_BUTTON.PreviewBrickData;
             Require(straight.gridLevel == pod.gridLevel, "Fixture marker grid sizes differ.");
             float unit = straight.GridSize;
-            var continuation = straight;
+            var continuation = fixtureCurve ? Definition(profile, "right").PreviewBrickData : straight;
             switchData.gridLevel = pod.gridLevel;
             // Keep the control above the guide point so it clears the rail at the join.
             switchData.gridPosition = new Vector3i(0, switchData.GridSizeUnit, 0);
@@ -116,11 +123,13 @@ namespace Sevo.Example.HoverRailGuide
             Place(fixtureTrack!, continuation);
             BrickCoord next = default;
             while (WaitFor(() => TryFind(fixtureTrack, continuation, out next), deadline, "second rail marker")) yield return null;
+            fixtureContinuation = next;
             Require((next.Position - start.Position - 4f * unit * forward).sqrMagnitude < 0.0025f,
                 "The native markers do not share the expected straight endpoint.");
 
             var frame = start.TransformData;
-            Vector3 spawn = start.Position + start.LocalForward * unit + start.LocalUp * (1.5f * unit)
+            float initialProgress = fixtureCurve ? 3.4f : 1f;
+            Vector3 spawn = start.Position + start.LocalForward * (initialProgress * unit) + start.LocalUp * (1.5f * unit)
                 + start.LocalRight * (0.1f * unit);
             fixturePod = player.NetworkSetup.ServerCreateEntity(pod,
                 new WorldTransform(frame.LocalToSystem(spawn), frame.rotation), EntityType.spaceship);
@@ -145,11 +154,19 @@ namespace Sevo.Example.HoverRailGuide
             while (WaitFor(() => fixtureHandedOff || fixtureUnexpectedRelease != null, deadline, "continuous segment handoff"))
                 yield return null;
             Require(fixtureHandedOff, "Pod released before handoff: " + fixtureUnexpectedRelease);
+            if (fixtureCurve)
+            {
+                deadline = Time.unscaledTime + 15f;
+                while (WaitFor(() => fixtureFollowedCurve || fixtureUnexpectedRelease != null, deadline, "curve travel"))
+                    yield return null;
+                Require(fixtureFollowedCurve, "Pod released before following the curve: " + fixtureUnexpectedRelease);
+            }
             fixtureDrive = false;
             player.CommandActivator.CmdActivate(toggle, 1f, true);
             deadline = Time.unscaledTime + 5f;
             while (WaitFor(() => fixtureReleased, deadline, "switch release")) yield return null;
-            Logger.LogInfo("KEEL_HOVER_RAIL PASS live guide capture, straight handoff, and switch release");
+            Logger.LogInfo("KEEL_HOVER_RAIL PASS live guide capture, "
+                + (fixtureCurve ? "curve travel" : "straight handoff") + ", and switch release");
         }
 
         private void PropelFixture(GridPhysicsContext step)
@@ -159,14 +176,30 @@ namespace Sevo.Example.HoverRailGuide
             if (!fixtureDrive || pod == null || track == null || pod.Rigidbody == null || track.Rigidbody == null) return;
             Vector3 point = fixturePodMarker.WorldPosition;
             Vector3 forward = fixtureTrackMarker.WorldForward;
-            Vector3 relative = pod.Rigidbody.VelocityAtPoint(point) - track.Rigidbody.VelocityAtPoint(point);
+            if (!TryPointVelocity(pod.Rigidbody, point, out var podVelocity)
+                || !TryPointVelocity(track.Rigidbody, point, out var trackVelocity))
+                return;
+            Vector3 relative = podVelocity - trackVelocity;
+            if (fixtureCurve && fixtureHandedOff)
+            {
+                var curve = fixtureContinuation;
+                float unit = curve.brickData.GridSize * curve.TransformData.scale;
+                var frame = new RailFrame(track, curve.WorldPosition, curve.WorldForward, curve.WorldUp, curve.WorldRight, unit, true);
+                var projected = frame.Project(point);
+                forward = projected.Tangent;
+                Vector3 offset = point - curve.WorldPosition;
+                fixtureFollowedCurve |= Vector3.Dot(offset, curve.WorldRight) >= 2.5f * unit
+                    && (projected.Point - point).sqrMagnitude <= 0.2f * unit * unit
+                    && Vector3.Dot(relative, forward) > 0.1f;
+            }
             if (Time.unscaledTime >= fixtureNextTelemetry)
             {
                 fixtureNextTelemetry = Time.unscaledTime + 1f;
                 Vector3 offset = point - fixtureTrackMarker.WorldPosition;
                 Logger.LogInfo(FormattableString.Invariant($"KEEL_HOVER_RAIL fixture motion along={Vector3.Dot(offset, forward):F2} height={Vector3.Dot(offset, fixtureTrackMarker.WorldUp):F2} cross={Vector3.Dot(offset, fixtureTrackMarker.WorldRight):F2} speed={Vector3.Dot(relative, forward):F2}"));
             }
-            float acceleration = Mathf.Clamp(4f * (1.5f - Vector3.Dot(relative, forward)), -8f, 8f);
+            float targetSpeed = fixtureCurve ? 2.5f : 1.5f;
+            float acceleration = Mathf.Clamp(4f * (targetSpeed - Vector3.Dot(relative, forward)), -8f, 8f);
             if (Mathf.Abs(acceleration) > 0.001f)
                 GridForceService.TryApplyAtGridPoint(step, pod, pod.TransformData.WorldToLocal(point),
                     pod.Rigidbody.Mass * acceleration * forward);

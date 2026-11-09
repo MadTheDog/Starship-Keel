@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BepInEx;
+using Manager;
 using Sevo.Framework.Runtime;
 using Sevo.Framework.Sdk;
 using UnityEngine;
@@ -39,6 +40,17 @@ namespace Sevo.Example.HoverRailGuide
         {
             Logger.LogInfo("KEEL_HOVER_RAIL " + message);
             RecordFixtureObservation(message);
+        }
+
+        private static bool TryPointVelocity(EntityRigidbody body, Vector3 worldPoint, out Vector3 velocity)
+        {
+            velocity = default;
+            var handle = body.SkyRigidbody;
+            if (!handle.IsValid || !SkyRigidbody.datas.IsCreated || handle.id >= SkyRigidbody.datas.Length
+                || !float.IsFinite(worldPoint.sqrMagnitude)) return false;
+            // The native data function expects a floating-origin world point in long coordinates.
+            velocity = handle.Data.VelocityAtPoint(new Vector3l(worldPoint));
+            return float.IsFinite(velocity.sqrMagnitude);
         }
 
         private sealed class RailMarker : FunctionalBlockBehavior
@@ -217,7 +229,13 @@ namespace Sevo.Example.HoverRailGuide
                     }
                 }
 
-                Vector3 relativeVelocity = body.VelocityAtPoint(podPoint) - selected.Grid.Rigidbody.VelocityAtPoint(guide.Point);
+                if (!TryPointVelocity(body, podPoint, out var podVelocity)
+                    || !TryPointVelocity(selected.Grid.Rigidbody, guide.Point, out var trackVelocity))
+                {
+                    if (previous != null) Release("velocity unavailable");
+                    return;
+                }
+                Vector3 relativeVelocity = podVelocity - trackVelocity;
                 Vector3 acceleration = 18f * Vector3.ProjectOnPlane(error, guide.Tangent)
                     - 7f * Vector3.ProjectOnPlane(relativeVelocity, guide.Tangent);
                 acceleration = Vector3.ClampMagnitude(acceleration, 30f);
