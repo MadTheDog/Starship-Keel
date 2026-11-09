@@ -27,8 +27,13 @@ namespace Sevo.Framework.Runtime
             RegisterCore(ownerId, localName, revision, displayName, selectTemplate, transportType);
         }
 
+        /// <summary>Declares an opt-in flush cargo fitting for the isolated creative placement adapter.</summary>
+        public static void RegisterFlushItemFitting(string ownerId, string localName, int revision, string displayName,
+            Func<Brick?> selectTemplate)
+            => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, ItemStorageType.tube, flush: true);
+
         private static void RegisterCore(string ownerId, string localName, int revision, string displayName,
-            Func<Brick?> selectTemplate, ItemStorageType? transportType)
+            Func<Brick?> selectTemplate, ItemStorageType? transportType, bool flush = false)
         {
             if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.", nameof(displayName));
             if (selectTemplate == null) throw new ArgumentNullException(nameof(selectTemplate));
@@ -50,6 +55,7 @@ namespace Sevo.Framework.Runtime
                     CollisionWidth = template.CollisionWidth,
                     CollisionScaleFactor = template.CollisionScaleFactor,
                     isDynamicGridSize = template.isDynamicGridSize,
+                    forceLocalGrid = template.forceLocalGrid,
                     gridLevel = template.gridLevel,
                     minGridSize = template.minGridSize,
                     maxGridSize = template.maxGridSize,
@@ -70,6 +76,7 @@ namespace Sevo.Framework.Runtime
                 };
                 brick.Tab(CodexTab.PIPES);
                 Bindings[id] = new Binding(brick, template, type, ports!);
+                if (flush) FlushStoragePlacement.Bind(brick);
                 return brick;
             }, () =>
             {
@@ -84,9 +91,11 @@ namespace Sevo.Framework.Runtime
                 if (sourceType != ItemStorageType.tube && sourceType != ItemStorageType.fuelPipe)
                     return "The stock pipe is outside the supported item and fluid transport types.";
                 type = transportType ?? sourceType;
+                if (flush && !FlushStoragePlacement.CanRegister(template, type))
+                    return "The audited creative flush-placement adapter or its stock template is unavailable.";
                 var nativePorts = StorageAttachmentPoint.GetPoints(template.brickID, sourceType);
                 (resizeMode, recipe) = StockTemplateResources.CopyRecipe(template);
-                if (nativePorts.Count != 2 || resizeMode.canResize || template.isTankJoin || template.forceLocalGrid
+                if (nativePorts.Count != 2 || resizeMode.canResize || !flush && (template.isTankJoin || template.forceLocalGrid)
                     || !template.skipHullCollisions || template.VoxelMaterials.Any(material =>
                         material.dynDataVert != DynData_Vert.none || material.dynDataPixel != DynData_Pixel.none))
                     return "Only fixed-size passive two-port fittings with static materials are supported.";
