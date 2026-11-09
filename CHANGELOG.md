@@ -13,6 +13,7 @@
 - Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
 - Added experimental grid physics timing and force application and fixed-facing slider path providers.
 - Added experimental HUD markers, native target selection, and Event Gate output publication for declared functional blocks.
+- Released Keel logic outputs now detach their native Event Gate jobs while preserving the pulse edge bit.
 - Added opt-in grid attachment and release requests through stock Mag-Lock acquisition.
 - Added an opt-in read-only observer for authoritative gameplay grid destruction.
 - Added experimental local vehicle assistance and bounded native waypoint approach leases, with manual input precedence.
