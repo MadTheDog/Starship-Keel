@@ -3,6 +3,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <LangVersion>latest</LangVersion>
     <AssemblyName>Sevo.Example.TerrainEditProbe</AssemblyName>
+    <ProbeManagedPath Condition="'$(ProbeManagedPath)' == ''">../../lab/game/Starship EVO_Data/Managed</ProbeManagedPath>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" Private="false" />
@@ -13,6 +14,7 @@
     <Reference Include="UnityEngine.CoreModule" HintPath="../../.refs/game/UnityEngine.CoreModule.dll" Private="false" />
     <Reference Include="UnityEngine.MathematicsModule" HintPath="../../.refs/game/UnityEngine.MathematicsModule.dll" Private="false" />
     <Reference Include="Unity.Collections" HintPath="../../.refs/game/Unity.Collections.dll" Private="false" />
+    <Reference Include="MessagePack" HintPath="$(ProbeManagedPath)/MessagePack.dll" Private="false" />
     <Reference Include="Mirror" HintPath="../../.refs/game/Mirror.dll" Private="false" />
   </ItemGroup>
 </Project>

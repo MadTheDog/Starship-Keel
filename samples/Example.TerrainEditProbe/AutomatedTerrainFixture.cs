@@ -71,6 +71,7 @@ namespace Sevo.Example.TerrainEditProbe
                 GameloopManager.OnTransformJobFinished += AdvanceAutomatedFixture;
                 Logger.LogInfo($"KEEL_TERRAIN_FIXTURE armed request={autoId:N} session={session}");
             }
+            if (AdvanceSaveEvidence()) return;
             if (autoArmed && Time.realtimeSinceStartup > autoDeadline)
                 FinishAutomation(false, "timed_out_" + autoPhase);
             if (!autoArmed) UninstallCoarseApproachObserver();
@@ -310,6 +311,7 @@ namespace Sevo.Example.TerrainEditProbe
             }
             if (hit.distance >= cutDistance - 0.1f) return;
             WriteEvidence(autoId, "auto-fill-rebuilt", node, hit.distance, snapshot);
+            if (BeginSaveEvidence(node, snapshot.Hash)) return;
             FinishAutomation(true, "cut_and_fill_native_geometry_rebuilt");
         }
     }

@@ -33,6 +33,8 @@ A request is consumed once per game process. Use a new ID for each retry. The pr
 
 Each payload is a 64,000-byte little-endian capture of the native 20×20×20 sample lattice. Each sample contains 32-bit color, signed 16-bit density, and the two texture ID bytes in native index order. Use `Get-FileHash -Algorithm SHA256` on the payload to reproduce the log's hash. Negative density denotes solid material. A cut must increase density monotonically and convert at least one solid sample to air. A fill must decrease it monotonically and convert at least one air sample to solid.
 
+To verify the native file during the automated run, set `SEVO_KEEL_TERRAIN_EDIT_FIXTURE_VERIFY_SAVE=1` and `SEVO_KEEL_TERRAIN_EDIT_FIXTURE_CHARACTER` to the exact disposable character name ending in the first eight characters of the session ID. The probe flushes the stock terrain save queue once, decodes the saved node, checks its native tree and level, and compares the decoded density hash with the rebuilt fill snapshot. It copies the original compressed `.dat` into the evidence directory and reports `detail=cut_fill_and_native_disk_payload_verified` on a match. Opening the world again is a separate check.
+
 `TerrainNotReady` indicates a rejected fixture patch. Use a different loaded interior patch or wait for the native terrain jobs, then issue a new request. A missing payload or `accepted=False` is a failed acceptance check. Preserve the BepInEx log, the run configuration, and raw payloads for every result. The headless evidence tests validate request isolation and signed-density comparison. Rendered cut, fill, and persistence remain separate checks.
 
 ## Optional automated fixture
