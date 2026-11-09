@@ -5,7 +5,6 @@ using System.Reflection;
 using Game;
 using HarmonyLib;
 using Manager;
-using UnityEngine;
 using VoxelEngine;
 using VoxelEngine.Crafting;
 
@@ -56,6 +55,7 @@ namespace Sevo.Framework.Runtime
 
         private static void ResetCycle()
         {
+            MachineWorkRateModifier.ResetWorld();
             recipes = null;
             completedDelta = 0f;
             Active.Clear();
@@ -204,11 +204,12 @@ namespace Sevo.Framework.Runtime
                             Active.Remove(key);
                             continue;
                         }
-                        if (!machine.IsPoweredActive) continue;
-                        work.Progress = Mathf.Min(1f, work.Progress + delta / work.Recipe.DurationSeconds);
-                        if (work.Progress < 1f)
+                        var rate = machine.IsPoweredActive ? MachineWorkRateModifier.GetRate(machine) : 1f;
+                        var step = work.Progress.Advance(machine.IsPoweredActive, delta, work.Recipe.DurationSeconds, rate);
+                        if (step == MachineWorkStep.None) continue;
+                        if (step == MachineWorkStep.Progressed)
                         {
-                            if (!machine.SetProgress(work.Progress))
+                            if (!machine.SetProgress(work.Progress.Value))
                                 throw new InvalidOperationException("Could not update native machine progress.");
                             continue;
                         }
@@ -387,7 +388,7 @@ namespace Sevo.Framework.Runtime
             private readonly int command;
             private readonly int storage;
             private readonly BrickCoord placement;
-            internal float Progress;
+            internal MachineWorkProgress Progress;
 
             internal Work(MachineNativeState machine, MachineRecipeDefinition recipe, ItemInstanceData input, ItemInstanceData output)
             {
