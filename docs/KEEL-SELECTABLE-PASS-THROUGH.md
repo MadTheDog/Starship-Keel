@@ -18,3 +18,5 @@ A storage fitting uses the same two ports and transport graph as a regular Keel 
 The passive hull declaration supplies the same contact behavior without requiring storage. A mod can use the shape as the visible housing for a sensor or cable. Mod-specific geometry, interaction rules, and processing remain with the mod.
 
 The native audit admits stock collision publication, contact and ordinary targeting paths, and both overlap paths independently of assembly build identity. The sample probes use a managed disposable solo lab. Collision geometry remains in the native targeting structures, so the flag does not remove their query or memory cost.
+
+The live capsule check applied zero correction at the fitting and 0.3411 m at the solid stock cargo control. A fresh-process reload restored the fitting ID, collision-off flag, local collider, separate inventories, and bidirectional item route. Global ray selection after reload remains unverified because the probe missed both the saved fitting and adjacent stock cargo even after approaching the grid.
