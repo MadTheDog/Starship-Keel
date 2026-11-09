@@ -11,6 +11,12 @@ namespace Sevo.Framework.Runtime
         }
 
         internal static bool ContinueApproach(float distance, float stopDistance)
-            => float.IsFinite(distance) && distance > stopDistance;
+            => ClassifyApproachDistance(distance, stopDistance) == WaypointApproachOutcome.Running;
+
+        internal static WaypointApproachOutcome ClassifyApproachDistance(float distance, float stopDistance)
+        {
+            if (!float.IsFinite(distance)) return WaypointApproachOutcome.Interrupted;
+            return distance <= stopDistance ? WaypointApproachOutcome.ReachedReleaseBoundary : WaypointApproachOutcome.Running;
+        }
     }
 }

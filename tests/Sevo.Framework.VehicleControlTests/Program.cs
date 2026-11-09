@@ -16,6 +16,12 @@ Check(!VehicleAssistPolicy.CanApply(true, 20, 20) && !VehicleAssistPolicy.CanApp
     && !VehicleAssistPolicy.CanApply(false, 20, 19), "Stock input and expiry must win");
 Check(!VehicleAssistPolicy.ContinueApproach(float.NaN, 100f) && !VehicleAssistPolicy.ContinueApproach(99f, 100f)
     && VehicleAssistPolicy.ContinueApproach(101f, 100f), "Approach must end at the stop boundary");
+var classify = typeof(VehicleAssistPolicy).GetMethod("ClassifyApproachDistance",
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+Check(classify != null, "Route callers need distinct arrival and invalid distance outcomes");
+string DistanceOutcome(float distance) => classify!.Invoke(null, new object[] { distance, 100f })!.ToString()!;
+Check(DistanceOutcome(100f) == "ReachedReleaseBoundary" && DistanceOutcome(101f) == "Running"
+    && DistanceOutcome(float.NaN) == "Interrupted", "An invalid distance must not masquerade as arrival");
 
 using var game = AssemblyDefinition.ReadAssembly(args.Single());
 var module = game.MainModule;

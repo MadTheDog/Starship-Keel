@@ -28,6 +28,8 @@ Enable `[Experimental] EnableWaypointFlight` or `SEVO_KEEL_EXPERIMENTAL_WAYPOINT
 
 The service cancels its native approach on reaching the release boundary, losing its target or pilot, or disposal. If the game starts another native approach, the Keel lease yields ownership. This boundary releases control to the stock pilot path. It does not brake the ship to a stop at the marker, plan a route around obstacles, or take remote control. The stock autopilot cancel key remains available.
 
+Use `WaypointFlightService.TryGetOutcome(handle, out var outcome)` to distinguish a reached boundary from an explicit release or interruption. A route controller can then wait for its own safe speed and clearance conditions before requesting another leg. Treat an interrupted leg as a stop condition.
+
 ## Acceptance in a disposable solo profile
 
 1. Register a marker on a loaded moving grid, then move the grid and change the camera or floating origin. Confirm that the marker follows its local offset and displays the requested distance.
