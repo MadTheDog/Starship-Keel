@@ -6,7 +6,7 @@ namespace Sevo.Example.SeatInteractionProbe
 {
     [BepInPlugin(Id, "Keel Seat Interaction Probe", "0.1.0")]
     [BepInDependency(Plugin.Id)]
-    public sealed class Probe : BaseUnityPlugin
+    public sealed partial class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.seatinteraction";
 
@@ -19,7 +19,9 @@ namespace Sevo.Example.SeatInteractionProbe
             SeatedPoseTargetProvider.Register(Id, "foot-pose", context =>
                 context.Seat.GetTagLabel("") == seatLabel.Value ? new SeatedFootTargets(left.Value, right.Value) : null);
             DismountPoseProvider.Register(Id, "exit", context =>
-                context.Seat.GetTagLabel("") == seatLabel.Value ? exit.Value : (Vector3?)null);
+                TrySelectFixtureExit(context, out var candidate) ? candidate
+                    : context.Seat.GetTagLabel("") == seatLabel.Value ? exit.Value : (Vector3?)null);
+            PrepareDismountFixture();
         }
     }
 }
