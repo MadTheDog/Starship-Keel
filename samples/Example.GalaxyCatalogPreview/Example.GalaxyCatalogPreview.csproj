@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" Private="false" />
     <Reference Include="BepInEx"><HintPath>../../.refs/bepinex/BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>../../.refs/bepinex/0Harmony.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Assembly-CSharp"><HintPath>../../.refs/game/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>../../.refs/game/UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>../../.refs/game/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
