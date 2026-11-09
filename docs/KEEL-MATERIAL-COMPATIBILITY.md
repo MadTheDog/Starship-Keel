@@ -27,3 +27,9 @@ For an attachment or other visual supported by the [attachment API](KEEL-WEAPON-
 ## Mod author checks
 
 Use an isolated profile. Verify registration and visuals with your mod alone and with an independent custom-material mod. Reload a copied world, confirm assigned content identities still resolve, and inspect both mods' meshes and materials. Check the baked fallback too. For an attachment mod, include placement preview and paint when the material supports paint.
+
+## Rendered regression on Steam build 26451593 / 26w45a
+
+Unity's unused-asset cleanup dropped the expanded specular binding after character entry while retaining the diffuse alias and material buffer. Keel now keeps the published specular texture for the session. In the isolated D3D11 test, two native frames shared a camera, entity mask, and material buffer. Removing only the specular binding reproduced the excess stock glow. The shader slot used a one-layer, one-mip fallback in that frame and the expanded atlas in the corrected frame.
+
+A separate same-camera comparison used the original stock specular atlas as a control. The sampled pipe, Arc Furnace, and reactor regions matched the expanded atlas before lighting. The authored Tractor Beam accents rendered with the corrected binding. Independent repair and docking declarations kept their default paint and emissive material rows in the live GPU buffer after world load. The test read the draw's mip range and compared decoded stock texture mips. Per-pixel mip selection and placed visual checks for the independent attachments remain unverified.
