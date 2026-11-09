@@ -22,7 +22,7 @@ namespace Sevo.Framework.Runtime
         { Key=key; Revision=revision; Factory=factory; PrepareTemplate=prepareTemplate; Kind=kind; OwnedRepeat=ownedRepeat; }
     }
 
-    internal enum ContentKind { Ordinary, Functional, AttachmentReceiver, Attachment, ReceiverRepeat, StorageConnector }
+    internal enum ContentKind { Ordinary, Functional, AttachmentReceiver, Attachment, ReceiverRepeat, StorageConnector, NativeBlockVariant }
 
     public sealed class RegistrationCatalog
     {

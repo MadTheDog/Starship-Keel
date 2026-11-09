@@ -86,6 +86,19 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult oreDiscovery;
                 CapabilityResult terrainMaterials;
                 CapabilityResult storageConnectors;
+                CapabilityResult nativeBlockVariants;
+                CapabilityResult contextActions;
+                CapabilityResult inventoryViews;
+                CapabilityResult worldSurfaceQuery;
+                CapabilityResult gridRecovery;
+                CapabilityResult terrainEdits;
+                CapabilityResult seatedPoseTargets;
+                CapabilityResult dismountPoses;
+                CapabilityResult blockAssemblies;
+                CapabilityResult shipyardAssemblyEligibility;
+                CapabilityResult transferLinks;
+                CapabilityResult gridPhysics;
+                CapabilityResult mechanismPaths;
                 CapabilityResult bodyEnvironment;
                 CapabilityResult terrainTextureOverrides;
                 CapabilityResult terrainMaterialRegistration;
@@ -127,6 +140,19 @@ namespace Sevo.Framework.Runtime
                     oreDiscovery = ContractAudit.EvaluateOreDiscovery(metadata.MainModule);
                     terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
                     storageConnectors = ContractAudit.EvaluateStorageConnectors(metadata.MainModule);
+                    nativeBlockVariants = ContractAudit.EvaluateNativeBlockVariants(metadata.MainModule);
+                    contextActions = ContractAudit.EvaluateContextActions(metadata.MainModule);
+                    inventoryViews = ContractAudit.EvaluateInventoryViews(metadata.MainModule);
+                    worldSurfaceQuery = ContractAudit.EvaluateWorldSurfaceQuery(metadata.MainModule);
+                    gridRecovery = ContractAudit.EvaluateGridRecovery(metadata.MainModule);
+                    terrainEdits = ContractAudit.EvaluateTerrainEdits(metadata.MainModule);
+                    seatedPoseTargets = ContractAudit.EvaluateSeatedPoseTargets(metadata.MainModule);
+                    dismountPoses = ContractAudit.EvaluateDismountPoses(metadata.MainModule);
+                    blockAssemblies = ContractAudit.EvaluateBlockAssemblies(metadata.MainModule);
+                    shipyardAssemblyEligibility = ContractAudit.EvaluateShipyardAssemblyEligibility(metadata.MainModule);
+                    transferLinks = ContractAudit.EvaluateTransferLinks(metadata.MainModule);
+                    gridPhysics = ContractAudit.EvaluateGridPhysics(metadata.MainModule);
+                    mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
                     bodyEnvironment = ContractAudit.EvaluateBodyEnvironment(metadata.MainModule);
                     terrainTextureOverrides = ContractAudit.EvaluateTerrainTextureOverrides(metadata.MainModule);
                     terrainMaterialRegistration = ContractAudit.EvaluateTerrainMaterialRegistration(metadata.MainModule);
@@ -275,7 +301,90 @@ namespace Sevo.Framework.Runtime
                 storageConnectors = InstallContentHook(storageConnectors, "EnableStorageConnectors", "STORAGE_CONNECTORS",
                     () => InstallContentHookPatches(storageConnectors, StorageConnectorRegistration.Install,
                         StorageConnectorRegistration.Disable));
-                if (!experimental && (items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
+                if (!experimental && nativeBlockVariants.Available)
+                    nativeBlockVariants = new CapabilityResult(nativeBlockVariants.Name, false, "Requires managed experimental brick registration.");
+                nativeBlockVariants = InstallContentHook(nativeBlockVariants, "EnableNativeBlockVariants", "NATIVE_BLOCK_VARIANTS",
+                    () =>
+                    {
+                        NativeBlockVariantRegistration.Enable();
+                        return nativeBlockVariants;
+                    }, NativeBlockVariantRegistration.Disable);
+                contextActions = InstallContentHook(contextActions, "EnableContextActions", "CONTEXT_ACTIONS",
+                    () => InstallContentHookPatches(contextActions,
+                        patches => ContextActionProvider.Install(patches, message => Logger.LogWarning(message)),
+                        ContextActionProvider.Disable));
+                if (!contextActions.Available && inventoryViews.Available)
+                    inventoryViews = new CapabilityResult(inventoryViews.Name, false, "Requires the context action hook.");
+                inventoryViews = InstallContentHook(inventoryViews, "EnableInventoryViews", "INVENTORY_VIEWS",
+                    () =>
+                    {
+                        InventoryViewService.Enable();
+                        return inventoryViews;
+                    }, InventoryViewService.Disable);
+                worldSurfaceQuery = InstallContentHook(worldSurfaceQuery, "EnableWorldSurfaceQuery", "WORLD_SURFACE_QUERY",
+                    () =>
+                    {
+                        WorldSurfaceQuery.Enable();
+                        return worldSurfaceQuery;
+                    }, WorldSurfaceQuery.Disable);
+                if (terrainEdits.Available && !worldSurfaceQuery.Available)
+                    terrainEdits = new CapabilityResult(terrainEdits.Name, false, "Requires the world surface query hook.");
+                terrainEdits = InstallContentHook(terrainEdits, "EnableTerrainEdits", "TERRAIN_EDITS",
+                    () =>
+                    {
+                        TerrainEditService.Enable(message => Logger.LogWarning(message));
+                        return terrainEdits;
+                    }, TerrainEditService.Disable);
+                seatedPoseTargets = InstallContentHook(seatedPoseTargets, "EnableSeatedPoseTargets", "SEATED_POSE_TARGETS",
+                    () => InstallContentHookPatches(seatedPoseTargets,
+                        patches => SeatedPoseTargetProvider.Install(patches, message => Logger.LogWarning(message)),
+                        SeatedPoseTargetProvider.Disable));
+                dismountPoses = InstallContentHook(dismountPoses, "EnableDismountPoses", "DISMOUNT_POSES",
+                    () => InstallContentHookPatches(dismountPoses,
+                        patches => DismountPoseProvider.Install(patches, message => Logger.LogWarning(message)),
+                        DismountPoseProvider.Disable));
+                blockAssemblies = InstallContentHook(blockAssemblies, "EnableBlockAssemblies", "BLOCK_ASSEMBLIES",
+                    () =>
+                    {
+                        BlockAssemblyProvider.Install();
+                        return blockAssemblies;
+                    }, BlockAssemblyProvider.Disable);
+                if (shipyardAssemblyEligibility.Available && !blockAssemblies.Available)
+                    shipyardAssemblyEligibility = new CapabilityResult(shipyardAssemblyEligibility.Name, false,
+                        "Requires the block assembly hook.");
+                shipyardAssemblyEligibility = InstallContentHook(shipyardAssemblyEligibility,
+                    "EnableShipyardAssemblyEligibility", "SHIPYARD_ASSEMBLY_ELIGIBILITY",
+                    () => InstallContentHookPatches(shipyardAssemblyEligibility,
+                        patches => ShipyardAssemblyEligibility.Install(patches, message => Logger.LogWarning(message)),
+                        ShipyardAssemblyEligibility.Disable));
+                var machineWorkRateModifiers = new CapabilityResult("machineWorkRateModifiers",
+                    machineRecipes.Available && blockAssemblies.Available, machineRecipes.Available && blockAssemblies.Available
+                        ? "Audited powered recipe progress and live assembly bindings are available."
+                        : "Requires machine recipes and block assemblies.");
+                machineWorkRateModifiers = InstallContentHook(machineWorkRateModifiers,
+                    "EnableMachineWorkRateModifiers", "MACHINE_WORK_RATE_MODIFIERS",
+                    () =>
+                    {
+                        MachineWorkRateModifier.Install();
+                        return machineWorkRateModifiers;
+                    }, MachineWorkRateModifier.Disable);
+                transferLinks = InstallContentHook(transferLinks, "EnableTransferLinks", "TRANSFER_LINKS",
+                    () => InstallContentHookPatches(transferLinks, TransferLinkService.Install, TransferLinkService.Disable));
+                gridPhysics = InstallContentHook(gridPhysics, "EnableGridPhysics", "GRID_PHYSICS",
+                    () => InstallContentHookPatches(gridPhysics,
+                        patches => GridPhysicsStep.Install(patches, message => Logger.LogWarning(message)),
+                        GridPhysicsStep.Disable));
+                mechanismPaths = InstallContentHook(mechanismPaths, "EnableMechanismPaths", "MECHANISM_PATHS",
+                    () => InstallContentHookPatches(mechanismPaths,
+                        patches => MechanismPathProvider.Install(patches, message => Logger.LogWarning(message)),
+                        MechanismPathProvider.Disable));
+                gridRecovery = InstallContentHook(gridRecovery, "EnableGridRecovery", "GRID_RECOVERY",
+                    () =>
+                    {
+                        GridRecoveryService.Enable();
+                        return gridRecovery;
+                    }, GridRecoveryService.Disable);
+                if (!experimental && (mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
                     || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
@@ -283,7 +392,7 @@ namespace Sevo.Framework.Runtime
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors})
+                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, terrainPlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, mechanismPaths})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -677,7 +786,7 @@ namespace Sevo.Framework.Runtime
             {
                 var failure=definition.PrepareTemplate is { } prepare
                     ? CheckPreparedTemplate(prepare,!definition.RequiresWeaponAttachments || attachmentHarmony!=null,
-                        definition.Kind!=ContentKind.StorageConnector)
+                        definition.Kind is not (ContentKind.StorageConnector or ContentKind.NativeBlockVariant))
                     : hullAvailable ? null : "The legacy stock hull contract is unavailable.";
                 if(failure==null)
                 {

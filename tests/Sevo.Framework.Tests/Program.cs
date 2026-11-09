@@ -95,6 +95,9 @@ using(var framework=AssemblyDefinition.ReadAssembly(typeof(Sevo.Framework.Runtim
   "the supported brick factories expose native Codex category selection");
 }
 StorageConnectorAuditTests.Run(game.MainModule, Check);
+NativeBlockVariantAuditTests.Run(game.MainModule, Check);
+GridRecoveryAuditTests.Run(game.MainModule, Check);
+TransferLinkAuditTests.Run(game.MainModule, Check);
 var results = Sevo.Framework.Runtime.ContractAudit.Evaluate(game.MainModule);
 Check(results["packedIds"].Available && results["lifecycle"].Available,"current game contracts");
 var hullField=game.MainModule.GetType("VoxelEngine.TabHull").Fields.Single(field=>field.Name=="HULL_A");

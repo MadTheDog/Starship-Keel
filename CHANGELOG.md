@@ -5,10 +5,13 @@
 - Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.
 - Added experimental terrain texture overrides that preserve stock material IDs and atlas layers.
 - Added an experimental celestial layout provider for targeted radius and orbit overrides and append-only rocky moons.
-- Added experimental stock-backed terrain material registration deterministic terrain material remaps, and material-to-item mining drop bindings.
+- Added experimental terrain material registration with optional custom layers, deterministic material remaps, and material-to-item mining drop bindings.
 - Added a bounded custom ore discovery feed for accepted stock scanner pulses.
 - Added a read-only galaxy catalog planner and native-format preview for mod-supplied candidates.
-- Added experimental stock-backed native storage connector variants for fixed two-port item or fluid fittings.
+- Added experimental native storage connectors, temporary hose links, and audited Mag-Lock and seat variants.
+- Added experimental context actions, cargo views, seated pose targets, dismount poses, and solo player-owned grid recovery.
+- Added experimental native surface queries, bounded terrain edits, block assemblies, shipyard requirements, and machine work-rate modifiers.
+- Added experimental grid physics timing and force application and fixed-facing slider path providers.
 
 ## 0.1.9
 

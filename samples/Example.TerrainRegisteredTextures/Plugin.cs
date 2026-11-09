@@ -38,8 +38,9 @@ namespace Sevo.Example.TerrainRegisteredTextures
             {
                 string? session = Environment.GetEnvironmentVariable("SEVO_PLATFORM_SESSION");
                 string? profile = Environment.GetEnvironmentVariable("SEVO_PLATFORM_STATE_DIR");
-                if (!Guid.TryParseExact(session, "N", out _) || profile == null
-                    || Application.companyName != "SEVO Keel Hooks Lab016" || Application.productName != "SEVO HK Test")
+                bool legacyLab = Application.companyName == "SEVO Keel Hooks Lab016" && Application.productName == "SEVO HK Test";
+                bool worldLab = Application.companyName == "SEVO Keel Gen Lab 0110" && Application.productName == "SEVO WG Test";
+                if (!Guid.TryParseExact(session, "N", out _) || profile == null || (!legacyLab && !worldLab))
                     throw new InvalidOperationException("The disposable Keel hooks lab is required.");
                 ProfileProtocol.Open(profile, Paths.GameRootPath, session!);
                 TerrainTextureOverride.Register(Id, "stock-normal", Sand, () =>
