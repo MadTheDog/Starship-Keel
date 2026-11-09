@@ -5,8 +5,11 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using Common;
+using Game;
 using HarmonyLib;
 using Manager;
+using UI.Inventory;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -14,14 +17,16 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
-    /// <summary>Internal creative prototype for a stock-faced flush storage fitting.</summary>
+    /// <summary>Placement adapter for a stock-faced flush storage fitting.</summary>
     internal static class FlushStoragePlacement
     {
         private static readonly Dictionary<int, BrickPipe> Fittings = new Dictionary<int, BrickPipe>();
         private static readonly FieldInfo LabelsField = typeof(CodeInstruction).GetField("labels")!;
         private static readonly object Affected = new object();
+        private static readonly List<DeferredBuild> deferredBuilds = new List<DeferredBuild>();
         private static ConditionalWeakTable<VoxelEntity, object> affectedGrids = new ConditionalWeakTable<VoxelEntity, object>();
         [ThreadStatic] private static PlacementCheck? check;
+        [ThreadStatic] private static bool payingForBuild;
         private static bool enabled;
         private static bool reportPlacement;
 
@@ -47,19 +52,29 @@ namespace Sevo.Framework.Runtime
 
         internal static void Install(Harmony harmony)
         {
+            reportPlacement = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUSH_STORAGE_PLACEMENT_DIAGNOSTICS") == "1";
             var query = typeof(SkyPhysics.QueryOverlapAabb);
             var collector = AccessTools.Method(query, nameof(SkyPhysics.QueryOverlapAabb.OnElementIntersect),
                 new[] { typeof(BrickColliderBVH.Element), typeof(int), typeof(bool), typeof(int) });
             var builder = AccessTools.TypeByName("NetworkedBuilder");
             var rpc = AccessTools.Method(builder, "UserCode_RpcVoxelAction", new[] { typeof(byte[]), typeof(bool), typeof(int) });
             var preview = AccessTools.Method(typeof(ActionBuild), "IsColliding", Type.EmptyTypes);
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing collector.");
             harmony.Patch(collector, transpiler: Hook(nameof(PatchCollector)));
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing commit.");
             harmony.Patch(rpc, transpiler: Hook(nameof(PatchCommit)));
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing preview.");
             harmony.Patch(preview, prefix: Hook(nameof(BeforePreview)), postfix: Hook(nameof(AfterPreview)),
                 finalizer: Hook(nameof(FinishPreview)));
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing inventory charge.");
+            harmony.Patch(AccessTools.Method(typeof(ActionBuild), nameof(ActionBuild.ConsumeQuantityForBuild),
+                new[] { typeof(BrickInstanceData), typeof(int) }), prefix: Hook(nameof(BeforeCharge)));
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing mirror validation.");
+            harmony.Patch(AccessTools.Method(typeof(ActionSymmetry), "BuildBrick", new[] { typeof(VoxelActionData), typeof(int) }),
+                prefix: Hook(nameof(BeforeMirror)), finalizer: Hook(nameof(FinishMirror)));
+            if (reportPlacement) Debug.Log("[Keel Flush] Installing pipe lifecycle.");
             harmony.Patch(AccessTools.Method(typeof(BrickPipe), nameof(BrickPipe.OnEntityInitialized),
                 new[] { typeof(BrickInstanceData), typeof(VoxelEntity), typeof(bool) }), postfix: Hook(nameof(AfterPipeAdded)));
-            reportPlacement = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUSH_STORAGE_PLACEMENT_DIAGNOSTICS") == "1";
             enabled = true;
         }
 
@@ -69,10 +84,72 @@ namespace Sevo.Framework.Runtime
             reportPlacement = false;
             check = null;
             Fittings.Clear();
+            deferredBuilds.Clear();
             affectedGrids = new ConditionalWeakTable<VoxelEntity, object>();
         }
 
         private static HarmonyMethod Hook(string method) => new HarmonyMethod(typeof(FlushStoragePlacement), method);
+
+        private static bool BeforeCharge(BrickInstanceData __0, int __1, ref bool __result)
+        {
+            if (payingForBuild || !GameloopManager.IsMainThread || !PlayerState.IsSurvival || !ActionBuild.IsBuildValid)
+                return true;
+            var proposed = ActionBuild.BrickCoord;
+            if (!SameBuildData(__0, proposed.brickData) || Prepare(proposed) is not { } placement) return true;
+
+            // The stock primary click ignores this method's result. Its exact action must have a
+            // receipt at commit, even when the native hotbar no longer contains enough items.
+            deferredBuilds.RemoveAll(build => build.Entity == null);
+            if (deferredBuilds.Count >= 64) return !placement.Fitting;
+            int itemId = ItemInstanceResources.GetItemData(__1).id;
+            deferredBuilds.Add(new DeferredBuild(placement.Entity, __0, itemId));
+            __result = true;
+            return false;
+        }
+
+        private static bool BeforeMirror(VoxelActionData __0, out bool __state)
+        {
+            __state = payingForBuild;
+            payingForBuild = true;
+            if (!PlayerState.IsSurvival || __0.type != VoxelActionType.build) return true;
+            var proposed = __0.brickCoord;
+            return Prepare(proposed) is not { } placement || CanApply(placement, proposed, mirrored: true);
+        }
+
+        private static Exception? FinishMirror(bool __state, Exception? __exception)
+        {
+            payingForBuild = __state;
+            return __exception;
+        }
+
+        private static bool SameBuildData(BrickInstanceData a, BrickInstanceData b)
+            => a == b && a.gridLevel == b.gridLevel && a.instanceId == b.instanceId;
+
+        private static bool HasBuildItem(BrickInstanceData data, int id)
+        {
+            if (id <= 0 || !UI_ItemBar.ContainsItemId(id)) return false;
+            var item = ItemInstanceResources.GetItemData(id);
+            int required = data.GetQuantity();
+            return item.id == id && item.itemType == WorldItemType.brick && item.prefabId == data.brickId
+                && required > 0 && float.IsFinite(item.quantity) && item.quantity >= required;
+        }
+
+        private sealed class DeferredBuild
+        {
+            internal readonly VoxelEntity Entity;
+            internal readonly BrickInstanceData Data;
+            internal readonly int ItemId;
+
+            internal DeferredBuild(VoxelEntity entity, BrickInstanceData data, int itemId)
+            {
+                Entity = entity;
+                Data = data;
+                ItemId = itemId;
+            }
+
+            internal bool Matches(BrickCoord proposed, int itemId)
+                => ReferenceEquals(Entity, proposed.entity) && SameBuildData(Data, proposed.brickData) && ItemId == itemId;
+        }
 
         private static IEnumerable<CodeInstruction> PatchCollector(IEnumerable<CodeInstruction> code)
         {
@@ -131,10 +208,63 @@ namespace Sevo.Framework.Runtime
                 affectedGrids.GetValue(__1, _ => Affected);
         }
 
-        private static void BeforePreview(out PlacementCheck? __state)
+        private static void BeforePreview(VoxelRaycastHit ___hitBuild, ref BrickInstanceData ___brickData,
+            ref Vector3i ___gridPositionInitial, ref Quaternion ___q, out PlacementCheck? __state)
         {
             __state = check;
+            if (TryResolveSeam(___hitBuild, ActionBuild.BrickCoord, out var seam, out var orientation))
+            {
+                ___brickData = seam;
+                ___gridPositionInitial = seam.gridPosition;
+                ___q = orientation;
+            }
             check = Prepare(ActionBuild.BrickCoord);
+        }
+
+        private static bool TryResolveSeam(VoxelRaycastHit hit, BrickCoord original, out BrickInstanceData seam, out Quaternion orientation)
+        {
+            seam = default;
+            orientation = default;
+            var data = original.brickData;
+            if (!IsFitting(data.brickId) || !hit.isHitBrick || !IsStockCargo(hit.brickData.brickId)
+                || data.gridLevel != hit.brickData.gridLevel || ActionBuild.PlacementSubGrid.Value != 0
+                || Prepare(original) is not { Authorized: true } originalPlacement
+                || !ReferenceEquals(hit.Entity, originalPlacement.Entity) || !IsLive(originalPlacement.Entity, hit.brickData))
+                return false;
+
+            var exposedNormal = VoxelRotation.ToClosestAxis(hit.localNormal);
+            if (Vector3.Dot(exposedNormal, hit.localNormal) < 0.99f) return false;
+            var bounds = hit.brickData.GetAabb(useGeoBounds: true);
+            var point = hit.localPoint - 0.5f * data.GridSize * exposedNormal;
+            float distance = data.GridSize * 0.18f;
+            var entity = originalPlacement.Entity;
+            bool found = false;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                if (Mathf.Abs(exposedNormal[axis]) > 0.99f) continue;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    float edge = side < 0 ? bounds.Min[axis] : bounds.Max[axis];
+                    if (Mathf.Abs(hit.localPoint[axis] - edge) > distance) continue;
+                    var face = hit;
+                    face.localPoint = point;
+                    face.localPoint[axis] = edge;
+                    face.localNormal = Vector3.zero;
+                    face.localNormal[axis] = side;
+                    var rotation = Quaternion.FromToRotation(Vector3.up, face.localNormal);
+                    var candidate = data;
+                    candidate.rotation = rotation.ToByte();
+                    candidate.gridPosition = BrickCommon.GetGridPosition(data.Brick, face, rotation, data.gridLevel, 0, globalGridOrigin: false);
+                    var placement = new PlacementCheck(candidate, entity, fitting: true, authorized: true);
+                    CollectTouchingCargo(placement);
+                    if (!placement.HasBothEndpoints || placement.Failed) continue;
+                    if (found) return false;
+                    seam = candidate;
+                    orientation = rotation;
+                    found = true;
+                }
+            }
+            return found;
         }
 
         private static void AfterPreview(ref bool __result)
@@ -152,8 +282,37 @@ namespace Sevo.Framework.Runtime
         {
             if (action.type != VoxelActionType.build) return true;
             var proposed = action.brickCoord;
+            DeferredBuild? deferred = null;
+            if (PlayerState.IsSurvival)
+            {
+                if (mirrored) return !IsFitting(proposed.brickData.brickId);
+                int itemId = action.itemDataId;
+                int index = deferredBuilds.FindIndex(build => build.Matches(proposed, itemId));
+                if (index >= 0)
+                {
+                    deferred = deferredBuilds[index];
+                    deferredBuilds.RemoveAt(index);
+                }
+                else return !IsFitting(proposed.brickData.brickId);
+            }
             var placement = Prepare(proposed);
-            if (placement == null) return true;
+            if (placement == null) return deferred == null;
+            if (!CanApply(placement, proposed, mirrored)) return false;
+            if (deferred == null) return true;
+            if (!HasBuildItem(proposed.brickData, deferred.ItemId)) return false;
+            payingForBuild = true;
+            try
+            {
+                return ActionBuild.ConsumeQuantityForBuild(proposed.brickData, deferred.ItemId);
+            }
+            finally
+            {
+                payingForBuild = false;
+            }
+        }
+
+        private static bool CanApply(PlacementCheck placement, BrickCoord proposed, bool mirrored)
+        {
             if (!placement.Authorized)
             {
                 if (reportPlacement) Debug.LogWarning($"KEEL_FLUSH_PLACEMENT denied before query fitting={placement.Fitting} main={GameloopManager.IsMainThread} unsafe={GameloopManager.IsNativeContainerAccessUnsafe}");
@@ -200,15 +359,14 @@ namespace Sevo.Framework.Runtime
         private static PlacementCheck? Prepare(BrickCoord proposed)
         {
             bool fitting = IsFitting(proposed.brickData.brickId);
-            if (!fitting && (!IsStockCargo(proposed.brickData.brickId)
-                || !FunctionalCommandState.IsSolo || PlayerState.gameMode != PlayerState.GameMode.creative))
+            if (!fitting && (!IsStockCargo(proposed.brickData.brickId) || !FunctionalCommandState.IsSolo))
                 return null;
 
             var entity = proposed.entity;
             if (!fitting && (entity == null || !affectedGrids.TryGetValue(entity, out _)))
                 return null;
 
-            bool authorized = enabled && FunctionalCommandState.IsSolo && PlayerState.gameMode == PlayerState.GameMode.creative
+            bool authorized = enabled && FunctionalCommandState.IsSolo
                 && GameloopManager.IsMainThread && !GameloopManager.IsNativeContainerAccessUnsafe
                 && !PlayerState.InLoadingScreen && !PlayerState.IsQuittingToDesktopOrTitle
                 && entity != null && entity.Parent != null && entity.Parent.IsInitialized
@@ -382,6 +540,7 @@ namespace Sevo.Framework.Runtime
             internal int CollectorCalls { get; set; }
             internal int EndpointCandidates { get; set; }
             private readonly int[] endpoints = new int[2];
+            internal bool HasBothEndpoints => endpoints[0] != 0 && endpoints[1] != 0;
 
             internal PlacementCheck(BrickInstanceData proposed, VoxelEntity entity, bool fitting, bool authorized)
             {

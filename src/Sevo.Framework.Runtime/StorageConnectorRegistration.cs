@@ -27,7 +27,7 @@ namespace Sevo.Framework.Runtime
             RegisterCore(ownerId, localName, revision, displayName, selectTemplate, transportType);
         }
 
-        /// <summary>Declares an opt-in flush cargo fitting for the isolated creative placement adapter.</summary>
+        /// <summary>Declares an opt-in flush cargo fitting for the solo placement adapter.</summary>
         public static void RegisterFlushItemFitting(string ownerId, string localName, int revision, string displayName,
             Func<Brick?> selectTemplate)
             => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, ItemStorageType.tube, flush: true);
@@ -41,7 +41,7 @@ namespace Sevo.Framework.Runtime
             RegisterCore(ownerId, localName, revision, displayName, selectTemplate, transportType, passThrough: true);
         }
 
-        /// <summary>Declares a Creative flush item fitting with optional selectable pass-through geometry.</summary>
+        /// <summary>Declares a solo flush item fitting with optional selectable pass-through geometry.</summary>
         public static void RegisterFlushItemFitting(string ownerId, string localName, int revision, string displayName,
             Func<Brick?> selectTemplate, bool passThrough)
             => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, ItemStorageType.tube,
@@ -109,7 +109,7 @@ namespace Sevo.Framework.Runtime
                     return "The stock pipe is outside the supported item and fluid transport types.";
                 type = transportType ?? sourceType;
                 if (flush && !FlushStoragePlacement.CanRegister(template, type))
-                    return "The audited creative flush-placement adapter or its stock template is unavailable.";
+                    return "The audited solo flush-placement adapter or its stock template is unavailable.";
                 var nativePorts = StorageAttachmentPoint.GetPoints(template.brickID, sourceType);
                 (resizeMode, recipe) = StockTemplateResources.CopyRecipe(template);
                 if (nativePorts.Count != 2 || resizeMode.canResize || !flush && (template.isTankJoin || template.forceLocalGrid)

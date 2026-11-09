@@ -36,6 +36,10 @@ namespace Sevo.Framework.Runtime
                 var apply = ContextMethod(module, builder, "DoAction", false, @void, action + "&", boolean, integer);
                 var add = ContextMethod(module, "VoxelEngine.EntityBricks", "Add", false, integer, instance);
                 var click = ContextMethod(module, build, "LeftClickUp", false, @void);
+                var cleanup = ContextMethod(module, build, "ReinitBuildTransientState", false, @void);
+                var select = ContextMethod(module, build, "OnIsSelected", false, @void, "Game.PlayerCommandManager");
+                var snap = ContextMethod(module, "VoxelEngine.BrickCommon", "GetGridPosition", true, "Vector3i",
+                    "VoxelEngine.Brick", "VoxelEngine.VoxelRaycastHit", "UnityEngine.Quaternion", integer, integer, boolean);
                 var mirrorBuild = ContextMethod(module, "VoxelEngine.ActionSymmetry", "BuildBrick", false, @void, action, integer);
                 var submit = ContextMethod(module, builder, "LocalVoxelAction", false, @void, action, boolean, integer);
                 var canBuild = ContextMethod(module, build, "CanBuild", false, boolean);
@@ -67,13 +71,14 @@ namespace Sevo.Framework.Runtime
                     || !ContextCalls(rpc, apply) || !ContextCalls(apply, add)
                     || !ContextCalls(consume, isSurvival) || !FlushDebitPrecedesSubmit(click, consume, submit)
                     || !FlushDebitPrecedesSubmit(mirrorBuild, consume, submit)
+                    || !ContextCalls(click, cleanup) || !ContextCalls(select, snap) || !ContextCalls(select, canBuild)
                     || !ContextCalls(canBuild, preview)
                     || !canBuild.Body.Instructions.Any(instruction => IsFlushField(instruction, Code.Stsfld, build, "isColliding"))
                     || !click.Body.Instructions.Any(instruction => IsFlushField(instruction, Code.Ldsfld, build, "isColliding"))
                     || !HasFlushSymmetryGuard(symmetry))
-                    throw new InvalidOperationException("Native creative placement, overlap or commit path changed.");
+                    throw new InvalidOperationException("Native flush preview, charge, overlap or commit path changed.");
 
-                return new CapabilityResult(capability, true, "Managed flush collision and creative commit paths validated.");
+                return new CapabilityResult(capability, true, "Managed flush targeting, overlap and deferred Survival charge paths validated.");
             }
             catch (Exception exception)
             {

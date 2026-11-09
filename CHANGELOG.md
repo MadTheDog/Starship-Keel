@@ -25,7 +25,7 @@
 - Added a separate HoverRail guide sample and geometry checks.
 - Added opt-in planet and moon material bands relative to the native nominal body radius.
 - Added read-only galaxy catalog checks for installed asset references, loaded aliases, and selected save identity.
-- Added an opt-in Creative solo prototype for flush placement of registered item fittings against stock cargo faces.
+- Added opt-in solo flush placement of registered item fittings against stock cargo faces. The build cursor can target the seam between two touching cargo units in Creative and Survival. Survival charges the native hotbar after the placement recheck, so an occupied seam leaves the inventory intact.
 - Added opt-in selectable pass-through geometry for stock-backed item and fluid fittings and passive hull shapes. Native placement overlap, targeting, and conveyor routing remain available.
 - Keep the expanded attachment specular atlas alive across stock world loading so native blocks and mod-authored palettes retain their specular and emission data.
 - Reproduced stock glow on a fixed native camera by removing only the specular binding. The Direct3D 11 draw then used a one-layer fallback. With the retained atlas, stock emission matched the stock specular control in the sampled pipe, furnace, and reactor regions.
