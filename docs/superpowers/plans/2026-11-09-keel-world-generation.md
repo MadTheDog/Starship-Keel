@@ -20,3 +20,11 @@
 | Native storage connector | Keel Developer #3, separate checkout | Preserve stock routing, collision, and lifecycle. Deliver independent commits and a lab plan. |
 
 The integration owner wires Plugin.cs, Program.cs, documentation indexes, version, changelog and the isolated test profile. Merge feature slices only after deterministic validation, drift tests, and an inventory of supported and unsupported cases. Do not publish from this worktree.
+
+## Completion passes
+
+1. Extend the celestial rules with append-only rocky planets. Preserve stock body indices, reject collisions and unsafe orbits, and verify that the system, mission and destination consumers agree in a disposable profile.
+2. Verify terrain textures at the shader publication and native distant-bake boundaries. Keep any GPU capture in the sample and compare stock and overridden runs on the same seeded system. Keep any visual acceptance gaps explicit.
+3. Expose depth against a verified terrain surface contract. Check non-spherical surfaces, shared samples across detail levels and neighboring nodes, and the unchanged stock path when no trusted surface is available.
+4. Publish an authored or stock-derived galaxy only after the native catalog, maps and routes validate together. Pin the catalog to the selected world before stock save entry. Exercise new entry, fresh-process reload and mismatch rejection separately.
+5. Keep Developer #3's interaction and grid work in the connector checkout. Integrate reviewed handoffs and verify the combined branch. Record implementation, rendered tests, and outstanding limitations separately in the 0.1.10 changelog.

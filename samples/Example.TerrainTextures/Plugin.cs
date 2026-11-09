@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using BepInEx;
 using Common;
 using Sevo.Framework.Runtime;
@@ -11,6 +12,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using World;
+using World.Terrain;
 
 namespace Sevo.Example.TerrainTextures
 {
@@ -30,10 +32,13 @@ namespace Sevo.Example.TerrainTextures
         private bool enabledProbe;
         private bool failed;
         private Texture2DArray? checkedDiffuse;
+        private string? distantCapture;
+        private bool distantCaptured;
 
         private void Awake()
         {
             enabledProbe = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_TEXTURE_PROBE") == "1";
+            distantCapture = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_TEXTURE_DISTANT_CAPTURE");
             if (!enabledProbe) return;
             TerrainTextureOverride.Register(Id, "sand-diffuse", Sand, () =>
                 new TerrainTextureLayers(diffuse: CopyStockLayer(Sand, Diffuse, 3)));
@@ -65,6 +70,15 @@ namespace Sevo.Example.TerrainTextures
 
         private void Update()
         {
+            if (!distantCaptured && distantCapture is "stock" or "override" && PlayerState.sessionMode == PlayerState.SessionMode.solo)
+            {
+                try { distantCaptured = CaptureDistantTerrain(distantCapture); }
+                catch (Exception exception)
+                {
+                    distantCaptured = true;
+                    Logger.LogError("KEEL_TERRAIN_TEXTURE_DISTANT FAIL: " + exception);
+                }
+            }
             if (!enabledProbe || failed) return;
             var rows = WorldTerrainResources.TerrainMaterialDatas;
             if (!rows.IsCreated || rows.Length == 0) return;
@@ -81,6 +95,37 @@ namespace Sevo.Example.TerrainTextures
                 failed = true;
                 Logger.LogError("KEEL_TERRAIN_TEXTURE_PROBE FAIL: " + exception);
             }
+        }
+
+        private bool CaptureDistantTerrain(string mode)
+        {
+            var texture = Shader.GetGlobalTexture("PLANET_TERRAIN_DIFFUSE") as Texture2DArray;
+            var nodes = PlanetTextureNodeData.NodeDatas;
+            if (texture == null || !nodes.IsCreated) return false;
+            var candidates = Enumerable.Range(0, Math.Min(nodes.Length, texture.depth))
+                .Select(index => (Index: index, Node: nodes[index]))
+                .Where(candidate => candidate.Node.planetGenerationId > 0)
+                .GroupBy(candidate => candidate.Node.planetGenerationId)
+                .Where(group => group.Select(candidate => candidate.Node.parentFaceId).Distinct().Count() == 6)
+                .OrderBy(group => group.Key)
+                .FirstOrDefault();
+            if (candidates == null) return false;
+            if (TerrainTextureOverride.IsAvailable != (mode == "override"))
+                throw new InvalidOperationException("Texture override availability does not match the capture mode.");
+            if (mode == "override" && checkedDiffuse == null) return false;
+
+            using var sha = SHA256.Create();
+            foreach (var face in candidates.GroupBy(candidate => candidate.Node.parentFaceId).OrderBy(group => group.Key))
+            {
+                var selected = face.OrderBy(candidate => candidate.Node.level).First();
+                var bytes = ReadGpuLayer(texture, selected.Index, 0);
+                if (bytes.All(value => value == 0))
+                    throw new InvalidOperationException("The distant planet texture has no published image.");
+                var hash = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "");
+                Logger.LogInfo(FormattableString.Invariant($"KEEL_TERRAIN_TEXTURE_DISTANT mode={mode} planet={selected.Node.planetGenerationId} face={face.Key} level={selected.Node.level} width={texture.width} sha256={hash}"));
+            }
+            Logger.LogInfo("KEEL_TERRAIN_TEXTURE_DISTANT PASS mode=" + mode);
+            return true;
         }
 
         private void Verify(NativeArray<TerrainMaterialData> rows, Texture2DArray? diffuse, Texture2DArray? normal)
@@ -105,6 +150,8 @@ namespace Sevo.Example.TerrainTextures
             int ironLayer = WorldTerrainResources.DUMMY.textures.IndexOf(resources.terrainTextures[iron].textureDiffuse);
             VerifyMaterial(upload, rows[sand], sand, sandLayer, firstLayer, diffuse, normal, replacements[Sand], null);
             VerifyMaterial(upload, rows[iron], iron, ironLayer, firstLayer, diffuse, normal, null, replacements[Iron]);
+            VerifyUploadedLayer(stockDiffuse, 3, diffuse, rows[sand].textureId);
+            VerifyUploadedLayer(stockNormal, 4, normal, rows[iron].textureId);
 
             for (int index = 0; index < resources.terrainTextures.Count; index++)
             {
@@ -149,6 +196,57 @@ namespace Sevo.Example.TerrainTextures
                 || BitConverter.ToSingle(data, fadeOffset + 8) != fade.b
                 || BitConverter.ToSingle(data, fadeOffset + 12) != fade.a)
                 throw new InvalidOperationException("The layer or diffuse mip color did not reach the native GPU material row.");
+        }
+
+        private static void VerifyUploadedLayer(Texture2DArray stock, int donorLayer, Texture2DArray expanded, int layer)
+        {
+            int distantMip = Math.Min(4, stock.mipmapCount - 1);
+            foreach (int mip in new[] { 0, distantMip }.Distinct())
+            {
+                var expected = SampleGpuLayer(stock, donorLayer, mip);
+                var uploaded = SampleGpuLayer(expanded, layer, mip);
+                bool donorVaries = expected.Skip(4).Where((value, index) => value != expected[index % 4]).Any();
+                if (!donorVaries || !uploaded.SequenceEqual(expected))
+                    throw new InvalidOperationException("The uploaded terrain layer differs from its donor at mip " + mip + ".");
+            }
+        }
+
+        private static byte[] SampleGpuLayer(Texture2DArray texture, int layer, int mip)
+        {
+            int width = Math.Max(1, texture.width >> mip);
+            int height = Math.Max(1, texture.height >> mip);
+            var slice = new Texture2D(width, height, texture.graphicsFormat, 1, TextureCreationFlags.None);
+            var target = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            var previous = RenderTexture.active;
+            try
+            {
+                Graphics.CopyTexture(texture, layer, mip, slice, 0, 0);
+                Graphics.Blit(slice, target);
+                var request = AsyncGPUReadback.Request(target, 0);
+                request.WaitForCompletion();
+                if (request.hasError) throw new InvalidOperationException("Sampled terrain mip readback failed.");
+                return request.GetData<byte>().ToArray();
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(target);
+                Destroy(slice);
+            }
+        }
+
+        private static byte[] ReadGpuLayer(Texture2DArray texture, int layer, int mip)
+        {
+            int width = Math.Max(1, texture.width >> mip);
+            int height = Math.Max(1, texture.height >> mip);
+            var request = AsyncGPUReadback.Request(texture, mip, 0, width, 0, height, layer, 1);
+            request.WaitForCompletion();
+            if (request.hasError)
+                throw new InvalidOperationException("Terrain texture GPU readback failed at mip " + mip + ".");
+            var bytes = request.GetData<byte>().ToArray();
+            if (bytes.Length == 0)
+                throw new InvalidOperationException("Terrain texture GPU readback was empty at mip " + mip + ".");
+            return bytes;
         }
 
         private static void VerifyStockMips(Texture2DArray stock, Texture2DArray expanded)
