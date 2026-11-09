@@ -1,6 +1,6 @@
 # Starship Keel changelog
 
-## 0.2.0 candidate
+## 0.2.0
 
 - Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.
 - Added experimental terrain texture overrides that preserve stock material IDs and atlas layers.
