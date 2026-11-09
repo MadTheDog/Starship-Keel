@@ -45,10 +45,15 @@ namespace Sevo.Framework.Runtime
                     instance, type, "System.Int32");
                 var getPoint = ConnectorMethod(module, points, "GetPoint", true, points,
                     type, "System.Int32", instance);
+                var compatible = ConnectorMethod(module, storage, "AreTypeCompatible", true, "System.Boolean", type, type);
+                var itemStorage = ConnectorMethod(module, storage, "IsItemStorage", true, "System.Boolean", type);
+                ConnectorMethod(module, storage, "IsTubeOrHose", true, "System.Boolean", type);
                 RequireConnectorEnum(module, type, "tube", (int)VoxelEngine.ItemStorageType.tube);
                 RequireConnectorEnum(module, type, "fuelPipe", (int)VoxelEngine.ItemStorageType.fuelPipe);
                 RequireConnectorEnum(module, "VoxelEngine.DynData_Pixel", "none", (int)VoxelEngine.DynData_Pixel.none);
                 RequireConnectorEnum(module, "VoxelEngine.DynData_Vert", "none", (int)VoxelEngine.DynData_Vert.none);
+                RequireConnectorEnum(module, "VoxelEngine.BrickFunctionType", "itemTransport", (int)VoxelEngine.BrickFunctionType.itemTransport);
+                RequireConnectorEnum(module, "VoxelEngine.BrickFunctionType", "fluidTransport", (int)VoxelEngine.BrickFunctionType.fluidTransport);
                 var getterBody = getter.Body.Instructions.Where(instruction => instruction.OpCode.Code != Code.Nop).ToArray();
                 if (!lookup.IsPublic || !constructor.IsPublic || getterBody.Length != 3
                     || getterBody[0].OpCode.Code != Code.Ldarg_0 || getterBody[1].OpCode.Code != Code.Ldfld
@@ -60,7 +65,8 @@ namespace Sevo.Framework.Runtime
                     || !ConnectorCalls(remove, teardown) || !ConnectorCalls(initialized, add)
                     || !ConnectorCalls(add, direct) || !ConnectorCalls(direct, lookup) || !ConnectorCalls(system, lookup)
                     || !ConnectorCalls(add, setConnector) || !ConnectorCalls(setConnector, connectorBrick)
-                    || !ConnectorCalls(connectorBrick, getPoint) || !ConnectorCalls(getPoint, lookup))
+                    || !ConnectorCalls(connectorBrick, getPoint) || !ConnectorCalls(getPoint, lookup)
+                    || !ConnectorCalls(add, compatible) || !ConnectorCalls(compatible, itemStorage, minimum: 2))
                     throw new InvalidOperationException("Native pipe construction, port lookup or graph lifecycle changed.");
 
                 return new CapabilityResult(capability, true, "Native storage connector port lookup and lifecycle validated.");
@@ -85,9 +91,9 @@ namespace Sevo.Framework.Runtime
                 && method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters))
                 ?? throw new InvalidOperationException("Missing native connector method: " + type + "." + name);
 
-        private static bool ConnectorCalls(MethodDefinition caller, MethodDefinition target)
-            => caller.HasBody && caller.Body.Instructions.Any(instruction =>
+        private static bool ConnectorCalls(MethodDefinition caller, MethodDefinition target, int minimum = 1)
+            => caller.HasBody && caller.Body.Instructions.Count(instruction =>
                 (instruction.OpCode.Code == Code.Call || instruction.OpCode.Code == Code.Callvirt)
-                && instruction.Operand is MethodReference called && called.FullName == target.FullName);
+                && instruction.Operand is MethodReference called && called.FullName == target.FullName) >= minimum;
     }
 }

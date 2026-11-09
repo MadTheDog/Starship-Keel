@@ -16,6 +16,8 @@ namespace Sevo.Example.StorageConnectorProbe
                 () => TabStorage.CONVEYOR_TUBE_SHORT);
             StorageConnectorRegistration.Register(Id, "angled-fluid", 1, "Probe Angled Fluid Pipe",
                 () => TabStorage.PIPE_ANGLED);
+            StorageConnectorRegistration.Register(Id, "angled-item", 1, "Probe Angled Conveyor",
+                () => TabStorage.PIPE_ANGLED, ItemStorageType.tube);
         }
     }
 }

@@ -7,7 +7,7 @@ using VoxelEngine;
 
 namespace Sevo.Framework.Runtime
 {
-    /// <summary>Registers independently identified fittings that preserve a stock pipe's transport and placement.</summary>
+    /// <summary>Registers independently identified fittings with stock pipe placement and native transport.</summary>
     public static class StorageConnectorRegistration
     {
         private static readonly Dictionary<int, Binding> Bindings = new Dictionary<int, Binding>();
@@ -16,11 +16,25 @@ namespace Sevo.Framework.Runtime
         /// <summary>Call during the dependent plugin's Awake with a read-only stock pipe selector.</summary>
         public static void Register(string ownerId, string localName, int revision, string displayName,
             Func<Brick?> selectTemplate)
+            => RegisterCore(ownerId, localName, revision, displayName, selectTemplate, null);
+
+        /// <summary>Uses the stock fitting's geometry and ports with an explicit item tube or fluid pipe role.</summary>
+        public static void Register(string ownerId, string localName, int revision, string displayName,
+            Func<Brick?> selectTemplate, ItemStorageType transportType)
+        {
+            if (transportType != ItemStorageType.tube && transportType != ItemStorageType.fuelPipe)
+                throw new ArgumentOutOfRangeException(nameof(transportType), "Only item tubes and fluid pipes are supported.");
+            RegisterCore(ownerId, localName, revision, displayName, selectTemplate, transportType);
+        }
+
+        private static void RegisterCore(string ownerId, string localName, int revision, string displayName,
+            Func<Brick?> selectTemplate, ItemStorageType? transportType)
         {
             if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A display name is required.", nameof(displayName));
             if (selectTemplate == null) throw new ArgumentNullException(nameof(selectTemplate));
 
             BrickPipe? source = null;
+            ItemStorageType sourceType = default;
             ItemStorageType type = default;
             List<StorageAttachmentPoint>? ports = null;
             ResizeMode? resizeMode = null;
@@ -49,8 +63,9 @@ namespace Sevo.Framework.Runtime
                     hasGlowPaint = template.hasGlowPaint,
                     defaultPaint = template.defaultPaint,
                     PreviewPaint = template.PreviewPaint,
-                    functionType = template.functionType,
-                    systemProfile = template.systemProfile,
+                    functionType = type == sourceType ? template.functionType : type == ItemStorageType.tube
+                        ? BrickFunctionType.itemTransport : BrickFunctionType.fluidTransport,
+                    systemProfile = type == sourceType ? template.systemProfile : default,
                     allowPipeOverlap = template.allowPipeOverlap
                 };
                 brick.Tab(CodexTab.PIPES);
@@ -65,10 +80,11 @@ namespace Sevo.Framework.Runtime
                     || Bindings.ContainsKey(template.brickID))
                     return "The selector must return a registered stock pipe.";
                 if (!StockTemplateResources.IsTemplateAvailable(template, out var reason)) return reason;
-                type = template.GetItemStorageType(null!, 0);
-                if (type != ItemStorageType.tube && type != ItemStorageType.fuelPipe)
+                sourceType = template.GetItemStorageType(null!, 0);
+                if (sourceType != ItemStorageType.tube && sourceType != ItemStorageType.fuelPipe)
                     return "The stock pipe is outside the supported item and fluid transport types.";
-                var nativePorts = StorageAttachmentPoint.GetPoints(template.brickID, type);
+                type = transportType ?? sourceType;
+                var nativePorts = StorageAttachmentPoint.GetPoints(template.brickID, sourceType);
                 (resizeMode, recipe) = StockTemplateResources.CopyRecipe(template);
                 if (nativePorts.Count != 2 || resizeMode.canResize || template.isTankJoin || template.forceLocalGrid
                     || !template.skipHullCollisions || template.VoxelMaterials.Any(material =>
@@ -82,6 +98,10 @@ namespace Sevo.Framework.Runtime
 
         internal static void Install(Harmony harmony)
         {
+            if (!ItemStorageType.tube.IsItemStorage() || ItemStorageType.fuelPipe.IsItemStorage()
+                || !ItemStorageType.tube.IsTubeOrHose() || !ItemStorageType.fuelPipe.IsTubeOrHose()
+                || StorageConnectionLogic.AreTypeCompatible(ItemStorageType.tube, ItemStorageType.fuelPipe))
+                throw new InvalidOperationException("Native storage no longer separates item and fluid connectors.");
             harmony.Patch(AccessTools.Method(typeof(StorageAttachmentPoint), nameof(StorageAttachmentPoint.GetPoints),
                 new[] { typeof(int), typeof(ItemStorageType) }),
                 postfix: new HarmonyMethod(typeof(StorageConnectorRegistration), nameof(ResolvePorts)));

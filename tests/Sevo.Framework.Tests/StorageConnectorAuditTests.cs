@@ -22,6 +22,13 @@ internal static class StorageConnectorAuditTests
         CheckMissingCall("VoxelEngine.StorageConnectionLogic", "IsSystemTubeLinkValid", "GetPoints");
 
         CheckMissingCall("VoxelEngine.StorageAttachmentPoint", "GetPoint", "GetPoints");
+        using var runtime = AssemblyDefinition.ReadAssembly(typeof(ContractAudit).Assembly.Location);
+        var registration = runtime.MainModule.GetType("Sevo.Framework.Runtime.StorageConnectorRegistration");
+        check(registration.Methods.Any(method => method.Name == "Register" && method.IsPublic
+            && method.Parameters.Last().ParameterType.FullName == "VoxelEngine.ItemStorageType"),
+            "Storage connector registration can explicitly select the transport role");
+        CheckMissingCall("VoxelEngine.StorageConnectionLogic", "AreTypeCompatible", "IsItemStorage");
+
         var tube = module.GetType("VoxelEngine.ItemStorageType").Fields.Single(field => field.Name == "tube");
         var originalValue = tube.Constant;
         tube.Constant = 255;
