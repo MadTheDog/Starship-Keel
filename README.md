@@ -28,6 +28,8 @@ The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **
 
 See the [framework API](docs/FRAMEWORK.md), [examples](samples/README.md), and [changelog](CHANGELOG.md).
 
+For custom blocks and textures, follow the [Keel material compatibility contract](docs/KEEL-MATERIAL-COMPATIBILITY.md).
+
 ## Build from source
 
 Install the .NET 8 SDK. Use the reference assemblies from your own Starship EVO installation and the [official BepInEx 5.4.23.5 Windows x64 distribution](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5).

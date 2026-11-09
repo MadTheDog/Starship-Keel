@@ -17,8 +17,8 @@ namespace Sevo.Framework.Runtime
         private const int MaxExtraLayers=64;
         private const string DiffuseName="MAIN_TEX", SpecularName="SPECULAR_TEX";
         private readonly List<PendingPalette> pending=new List<PendingPalette>();
-        private Texture2DArray? liveDiffuse, liveSpecular;
-        private VoxelMaterial[]? liveRows;
+        private MaterialBindingSnapshot<VoxelMaterial>? binding;
+        private string[] paletteKeys=Array.Empty<string>();
 
         private sealed class PendingPalette
         {
@@ -73,6 +73,11 @@ namespace Sevo.Framework.Runtime
                     || stockDiffuse!=Shader.GetGlobalTexture(DiffuseName) || stockSpecular!=Shader.GetGlobalTexture(SpecularName))
                     throw new InvalidOperationException("Native material resources changed while Keel was preparing the palette.");
 
+                var ownedRows=prepared.SelectMany(palette=>palette.rows).ToDictionary(row=>row.Id);
+                var snapshot=new MaterialBindingSnapshot<VoxelMaterial>(ownedRows,
+                    CaptureSlices(diffuse,ownedRows.Values.Select(row=>row.TextureID)),
+                    CaptureSlices(specular,ownedRows.Values.Select(row=>row.specularID)));
+                var keys=prepared.Select(palette=>palette.source.Key).ToArray();
                 try { Bind(diffuse,specular,rows,cursor); }
                 catch(Exception publicationError)
                 {
@@ -85,7 +90,7 @@ namespace Sevo.Framework.Runtime
                     }
                     throw;
                 }
-                liveDiffuse=diffuse; liveSpecular=specular; liveRows=rows;
+                binding=snapshot; paletteKeys=keys;
                 published=true;
                 foreach(var palette in prepared)
                 {
@@ -117,11 +122,36 @@ namespace Sevo.Framework.Runtime
             }
         }
 
-        internal void VerifyBindings()
+        internal string? BindingConflict()
         {
-            if(liveRows!=null && !HasBindings(liveDiffuse,liveSpecular,liveRows))
-                throw new InvalidOperationException("The published Keel voxel material bindings were replaced.");
+            if(binding==null) return null;
+            string? mismatch;
+            try
+            {
+                var diffuse=Shader.GetGlobalTexture(DiffuseName) as Texture2DArray;
+                var specular=Shader.GetGlobalTexture(SpecularName) as Texture2DArray;
+                var rows=VoxelMaterialResources.materialParamDatas;
+                mismatch=!SupportsAtlas(diffuse) || diffuse!=ResourcesLoader.VOXEL_DIFFUSE
+                    ? "MAIN_TEX or its native diffuse alias has an incompatible layout"
+                    : !SupportsAtlas(specular) ? "SPECULAR_TEX has an incompatible layout"
+                    : rows==null ? "the native material table is missing"
+                    : binding.Mismatch(rows,
+                        (slice,mip)=>ReadMip(diffuse!,slice,mip),
+                        (slice,mip)=>ReadMip(specular!,slice,mip));
+            }
+            catch(Exception exception)
+            {
+                mismatch="material bindings could not be inspected: "+exception.Message;
+            }
+            return mismatch==null ? null : string.Join(", ",paletteKeys)+": "+mismatch;
         }
+
+        private static Dictionary<int,byte[][]> CaptureSlices(Texture2DArray atlas,IEnumerable<int> slices)
+            => slices.Distinct().ToDictionary(slice=>slice,slice=>Enumerable.Range(0,atlas.mipmapCount)
+                .Select(mip=>ReadMip(atlas,slice,mip)).ToArray());
+
+        private static byte[] ReadMip(Texture2DArray atlas,int slice,int mip)
+            => (uint)slice<(uint)atlas.depth ? atlas.GetPixelData<byte>(mip,slice).ToArray() : Array.Empty<byte>();
 
         private static void PreparePalette(PendingPalette palette,Texture2DArray diffuse,Texture2DArray specular,int stockCount,int available,
             List<(Texture2D diffuse,Texture2D specular)> textures,

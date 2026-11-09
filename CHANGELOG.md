@@ -1,5 +1,12 @@
 # Starship Keel changelog
 
+## 0.1.9
+
+- Validate Keel-owned material rows and texture mip contents so compatible atlas extensions can coexist with custom attachments.
+- Preserve stock initialization after a material conflict and block stock world entry with a diagnostic naming the affected content.
+- Document [custom block and texture authoring requirements](docs/KEEL-MATERIAL-COMPATIBILITY.md).
+- Known limitation: with EvoCore 0.9.53 and Tractor Beam 0.3.6, the world can load but the Lua Computer can show the wrong main texture.
+
 ## 0.1.8 candidate
 
 - Added an opt-in item representation for caller-owned meshes, tint through the stock item material, and separate box colliders. The native 3D inventory preview and dropped item use the same representation.

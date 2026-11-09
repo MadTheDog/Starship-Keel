@@ -240,6 +240,7 @@ checks += ExpandedTests.Run();
 checks += RegistrationTests.Run();
 checks += FunctionalLifetimeTests.Run();
 checks += AttachmentMaterialAuditTests.Run();
+checks += MaterialBindingTests.Run();
 checks += AttachmentDefaultPaintAuditTests.Run();
 checks += CodexCategoryAuditTests.Run();
 checks += FluidHookTests.Run();

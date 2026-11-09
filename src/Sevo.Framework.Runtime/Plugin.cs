@@ -8,9 +8,11 @@ using HarmonyLib;
 using Mono.Cecil;
 using Sevo.Framework.Sdk;
 
+[assembly: InternalsVisibleTo("Sevo.Framework.Tests")]
+
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.1.8")]
+    [BepInPlugin(Id,"Starship Keel","0.1.9")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -29,6 +31,7 @@ namespace Sevo.Framework.Runtime
         private Harmony? modularReceiverHarmony;
         private readonly List<Action> contentHookStops = new List<Action>();
         private readonly AttachmentMaterialResources attachmentMaterials=new AttachmentMaterialResources();
+        private string? materialConflict;
         private Assembly? pendingAttachmentGame;
         private CapabilityResult? pendingAttachmentCapability;
         private bool awaitingAttachmentInteraction;
@@ -123,6 +126,12 @@ namespace Sevo.Framework.Runtime
                     Logger.LogWarning("Experimental brick registration disabled because its native contracts are unavailable.");
                 }
                 InstallBrickLifecycle(game);
+                if(experimental && materialCapability.Available)
+                {
+                    materialCapability=InstallMaterialWorldGuard(game,materialCapability);
+                    if(!materialCapability.Available)
+                        paintCapability=new CapabilityResult("attachmentPaint",false,materialCapability.Reason);
+                }
                 if(experimental && functionalRequested && functionalCapability.Available)
                 {
                     functionalCapability=InstallFunctionalCommands(game,functionalCapability);
@@ -689,6 +698,7 @@ namespace Sevo.Framework.Runtime
         private static void BeforeReady()
         {
             var plugin=instance; if(plugin==null) return;
+            if(plugin.materialConflict!=null) return;
             plugin.EnsureNotFailed(); plugin.status.ResourcesReady=false; plugin.resourceChecksPassed=false; plugin.status.ResourceCycle++;
             try
             {
@@ -697,7 +707,7 @@ namespace Sevo.Framework.Runtime
                 if(plugin.experimental)
                 {
                     if(plugin.registration==null) throw new InvalidOperationException("Resource-ready callback preceded managed registration.");
-                    plugin.attachmentMaterials.VerifyBindings();
+                    if(!plugin.CheckMaterialBindings()) return;
                     plugin.adapter!.ValidateResources(plugin.registration,plugin.limits!,true);
                 }
                 plugin.resourceChecksPassed=!plugin.status.Failed && plugin.Available("brickRegistry") && plugin.Available("nativeResources")
@@ -706,6 +716,53 @@ namespace Sevo.Framework.Runtime
             }
             catch(Exception exception) {plugin.Fail("Resource ownership/readiness validation failed",exception);if(plugin.experimental) throw;}
         }
+        private CapabilityResult InstallMaterialWorldGuard(Assembly game,CapabilityResult capability)
+        {
+            var hooks=new Harmony(Id+".material-world-entry");
+            try
+            {
+                var entryPoints=new[] {
+                    (Type: "UI.UI_CharacterSlot", Method: "PressButton"),
+                    (Type: "UI.UI_CharacterCreation", Method: "PlayWithNewCharacter"),
+                    (Type: "UI.UI_LobbySlot", Method: "ConnectToLobby")
+                };
+                foreach(var entry in entryPoints)
+                {
+                    var type=game.GetType(entry.Type);
+                    var target=type==null ? null : AccessTools.DeclaredMethod(type,entry.Method,Type.EmptyTypes);
+                    if(target==null || target.IsStatic || target.ReturnType!=typeof(void))
+                        throw new InvalidOperationException("Missing stock world entry: "+entry.Type+"."+entry.Method);
+                    hooks.Patch(target,new HarmonyMethod(typeof(Plugin),nameof(BeforeWorldEntry)) {priority=Priority.First});
+                }
+                return capability;
+            }
+            catch(Exception exception)
+            {
+                TryUnpatch(hooks);
+                return new CapabilityResult(capability.Name,false,
+                    "Stock world entry guard unavailable. Using baked material fallbacks. "+exception.Message);
+            }
+        }
+
+        private bool CheckMaterialBindings()
+        {
+            if(materialConflict!=null) return false;
+            var conflict=attachmentMaterials.BindingConflict();
+            if(conflict==null) return true;
+            materialConflict="Keel detected incompatible voxel materials. Restart with a compatible mod profile. "+conflict;
+            Fail("Voxel material conflict; stock resource initialization can finish, but world entry is blocked",
+                new InvalidOperationException(materialConflict));
+            return false;
+        }
+
+        private static bool BeforeWorldEntry()
+        {
+            var plugin=instance;
+            if(plugin==null || plugin.CheckMaterialBindings()) return true;
+            UI.UI_ConfirmationWindow.OpenWindow(plugin.materialConflict!);
+            return false;
+        }
+
         private static void AfterReady()
         {
             var plugin=instance; if(plugin==null) return;
