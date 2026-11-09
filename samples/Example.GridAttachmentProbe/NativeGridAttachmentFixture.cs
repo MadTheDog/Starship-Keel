@@ -39,7 +39,7 @@ namespace Sevo.Example.GridAttachmentProbe
                         Path.GetFullPath(Paths.GameRootPath).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase),
                     "Fixture requires a matching isolated lab path, product and managed experimental profile.");
                 ProfileProtocol.Open(state!, Paths.GameRootPath, session);
-                MoveTo(FixtureStep.SpawnMount, 120f);
+                fixtureStep = FixtureStep.SpawnMount;
             }
             catch (Exception exception) { Fail(exception); }
             return true;
@@ -50,6 +50,7 @@ namespace Sevo.Example.GridAttachmentProbe
             if (fixtureStep == FixtureStep.Off || fixtureStep == FixtureStep.Done) return;
             try
             {
+                if (fixtureDeadline == 0f) fixtureDeadline = Time.unscaledTime + 120f;
                 if (Time.unscaledTime > fixtureDeadline) throw new TimeoutException(fixtureStep.ToString());
                 if (!WorldReady()) return;
                 switch (fixtureStep)
