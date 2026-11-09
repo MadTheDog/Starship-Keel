@@ -10,7 +10,7 @@ ContentRegistration.RegisterFunctionalBlock("example.survey", "probe", 1, "Surve
 LogicOutputProvider.Declare("example.survey", "probe");
 ```
 
-Use the current placement's context to publish a held signal, one pulse per rendered frame, or a finite numeric value. Calls require the game thread and a native-container-safe phase during solo play. Every channel begins at zero on spawn and load. The owning mod decides how and when to reconstruct its outputs.
+Use the current placement's context to publish a held signal, one pulse per rendered frame, or a finite numeric value. Calls require the game thread and a native-container-safe phase during solo play. Every channel begins at zero on spawn and load. The owning mod decides how and when to reconstruct its outputs. On teardown, Keel resets the signal and numeric value and leaves the pulse edge bit unchanged until the native slot is released. A detached Event Gate stops polling the old Keel source slot.
 
 ```csharp
 LogicOutputProvider.TrySetSignal(context, detected);

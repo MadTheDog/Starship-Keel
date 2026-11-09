@@ -47,8 +47,8 @@ $propagation = [ordered]@{
 }
 foreach ($name in $propagation.Keys) { $expected.Add($name, $propagation[$name]) }
 $reset = @($trace | Where-Object Event -eq 'despawn')
-if ($RequireDespawnReset -or $reset.Count -gt 0) { $expected.Add('despawn', 'signal=0,pulse=0,value=0') }
-if ($RequireAutomaticBuild) { $expected.Add('automated-unlinked', 'all three stock gates retained and unlinked') }
+if ($RequireDespawnReset -or $reset.Count -gt 0) { $expected.Add('despawn', 'signal=0,pulse=1,value=0') }
+if ($RequireAutomaticBuild) { $expected.Add('automated-unlinked', 'three retained gates with inactive jobs and no extra pulse') }
 $last = -1
 foreach ($name in $expected.Keys) {
     $matches = @(for ($i = 0; $i -lt $trace.Count; $i++) { if ($trace[$i].Event -ceq $name) { $i } })

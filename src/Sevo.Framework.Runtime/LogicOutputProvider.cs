@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using HarmonyLib;
 using Manager;
 using Sevo.Framework.Sdk;
 using UnityEngine;
@@ -16,6 +17,7 @@ namespace Sevo.Framework.Runtime
         internal const int ValueEventId = 127;
         private static readonly HashSet<string> Declarations = new HashSet<string>(StringComparer.Ordinal);
         private static OutputField[]? registered;
+        private static AccessTools.FieldRef<CommandEventGate, int>? gateJobId;
         private static bool enabled;
         private static bool declarationsSealed;
 
@@ -64,6 +66,8 @@ namespace Sevo.Framework.Runtime
                     throw new InvalidOperationException("A native Event Gate slot is occupied: " + output.Id);
                 ownFields.Add(output.Field);
             }
+
+            gateJobId = AccessTools.FieldRefAccess<CommandEventGate, int>("jobDataId");
 
             // Stock only scans the game assembly. Append exactly our managed type and three vacant records.
             types.Add(type, ownFields);
@@ -120,7 +124,27 @@ namespace Sevo.Framework.Runtime
             {
                 output.Signal.Set(0f);
                 output.Value.Set(0f);
+                // A native pulse is an edge bit. Changing it here would emit another pulse.
             }
+        }
+
+        internal static void DetachGate(KeelLogicOutputCommand source, CommandEventGate gate)
+        {
+            if (!IsSafePhase || gateJobId == null || gate.IsRemoved || gate.predecessors.Count != 0
+                || !CommandEventGateResources.Datas.IsCreated)
+                return;
+
+            int index = gateJobId(gate);
+            if (index < 0 || index >= CommandEventGateResources.Datas.Length) return;
+            var job = CommandEventGateResources.Datas[index];
+            int stateId = job.stateDataId;
+            if (job.commandId != gate.commandId || stateId <= 0
+                || (stateId != source.Signal.id && stateId != source.Pulse.id && stateId != source.Value.id))
+                return;
+
+            // Stock SetStateData unbinds the gate but retains its old job record when no predecessor remains.
+            // Clear the owned binding before the old state slot can be reused.
+            CommandEventGateResources.Datas[index] = default;
         }
 
         private sealed class OutputField
@@ -182,6 +206,13 @@ namespace Sevo.Framework.Runtime
             Pulse.EmitPulse();
             lastPulseFrame = Time.frameCount;
             return true;
+        }
+
+        public override void OnTargetRemoved(ICommand target, bool onUnload)
+        {
+            base.OnTargetRemoved(target, onUnload);
+            if (!onUnload && target is CommandEventGate gate)
+                LogicOutputProvider.DetachGate(this, gate);
         }
 
         public override void OnDestroy(BrickUnspawnMode mode)

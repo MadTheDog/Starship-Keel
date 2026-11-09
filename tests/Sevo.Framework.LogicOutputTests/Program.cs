@@ -46,4 +46,17 @@ if (reads.Length == 0) throw new Exception("Expected native Event Gate field rea
 foreach (var instruction in reads) instruction.OpCode = OpCodes.Nop;
 try { Require(false, "The gate stopped reading the native field table"); }
 finally { foreach (var instruction in reads) instruction.OpCode = OpCodes.Ldsfld; }
+var releaseTargets = module.GetType("VoxelEngine.CommandCommon").Methods.Single(method => method.Name == "ReleaseTargets");
+var notifyRemoved = releaseTargets.Body.Instructions.Single(instruction => instruction.Operand is MethodReference method
+    && method.Name == "OnTargetRemoved");
+var notifyOpcode = notifyRemoved.OpCode;
+notifyRemoved.OpCode = OpCodes.Nop;
+try { Require(false, "Native source deletion no longer notifies detached targets"); }
+finally { notifyRemoved.OpCode = notifyOpcode; }
+
+var jobData = module.GetType("VoxelEngine.CommandEventGateResources/EventGateJobData");
+var sourceSlot = jobData.Fields.Single(field => field.Name == "stateDataId");
+sourceSlot.Name = "movedStateSlot";
+try { Require(false, "The detached Event Gate job source slot changed"); }
+finally { sourceSlot.Name = "stateDataId"; }
 Console.WriteLine("Logic output identity and native Event Gate contracts passed.");

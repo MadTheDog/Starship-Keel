@@ -141,12 +141,46 @@ namespace Sevo.Example.LogicOutputProbe
 
             var current = FindCommand(grid!, sourceData);
             Require(ReferenceEquals(current, output) && !output.IsRemoved, "Owned fixture source changed before removal.");
+            int signalJob = FindGateJob(signal, output.Signal.id);
+            int pulseJob = FindGateJob(pulse, output.Pulse.id);
+            int valueJob = FindGateJob(value, output.Value.id);
             PlaceOrDelete(grid!, output.brickData, VoxelActionType.delete);
             deadline = Time.unscaledTime + 12f;
             while (WaitingFor(() => FindCommand(grid!, sourceData) == null && !signal.IsRemoved && !pulse.IsRemoved
                 && !value.IsRemoved && signal.predecessors.Count == 0 && pulse.predecessors.Count == 0
                 && value.predecessors.Count == 0, deadline, "native source removal and gate unlink")) yield return null;
-            AutomatedRecord("automated-unlinked", "all three stock gates retained and unlinked");
+            deadline = Time.unscaledTime + 1.25f;
+            do
+            {
+                if (WorldReady())
+                {
+                    Require(!signal.IsRemoved && !pulse.IsRemoved && !value.IsRemoved && pulse.State == 0f
+                        && GateJobDetached(signalJob) && GateJobDetached(pulseJob) && GateJobDetached(valueJob),
+                        "A detached native gate still polls its released source or emitted an extra pulse.");
+                }
+                yield return null;
+            } while (Time.unscaledTime < deadline);
+            Require(WorldReady() && pulse.State == 0f && GateJobDetached(signalJob)
+                && GateJobDetached(pulseJob) && GateJobDetached(valueJob),
+                "The native detached gate jobs did not remain quiet.");
+            AutomatedRecord("automated-unlinked", "three retained gates with inactive jobs and no extra pulse");
+        }
+
+        private static int FindGateJob(CommandEventGate gate, int stateId)
+        {
+            var jobs = CommandEventGateResources.Datas;
+            for (int i = 0; i < jobs.Length; i++)
+            {
+                var job = jobs[i];
+                if (job.commandId == gate.commandId && job.stateDataId == stateId) return i;
+            }
+            throw new InvalidOperationException("Could not capture the bound native gate job.");
+        }
+
+        private static bool GateJobDetached(int index)
+        {
+            var jobs = CommandEventGateResources.Datas;
+            return jobs.IsCreated && index < jobs.Length && jobs[index].commandId == 0 && jobs[index].stateDataId == 0;
         }
 
         private static Brick ReadFixtureDefinition(ProfileSession profile)

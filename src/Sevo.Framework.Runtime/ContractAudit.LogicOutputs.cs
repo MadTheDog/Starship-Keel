@@ -15,6 +15,7 @@ namespace Sevo.Framework.Runtime
             const string capability = "logicOutputs";
             const string gate = "VoxelEngine.CommandEventGate";
             const string resources = "VoxelEngine.CommandEventGateResources";
+            const string jobData = resources + "/EventGateJobData";
             const string state = "VoxelEngine.CommandStateData";
             const string stateType = state + "/StateType";
             const string attribute = state + "/CommandStateDataField";
@@ -46,6 +47,11 @@ namespace Sevo.Framework.Runtime
                     || !Field(module, resources, "CommandStateDataFields", attribute + "[]", true)
                     || !Field(module, resources, "TypeFields",
                         "System.Collections.Generic.Dictionary`2<System.Type,System.Collections.Generic.List`1<System.Reflection.FieldInfo>>", true)
+                    || module.GetType(gate)?.Fields.SingleOrDefault(field => field.Name == "jobDataId") is not
+                        { IsStatic: false, FieldType.FullName: integer }
+                    || !Field(module, resources, "Datas", "Common.NativeRecyclableContainer`1<" + jobData + ">", true)
+                    || !Field(module, jobData, "commandId", integer, false)
+                    || !Field(module, jobData, "stateDataId", integer, false)
                     || !Field(module, state, "id", integer, false)
                     || !Field(module, state, "stateType", stateType, false))
                     throw new InvalidOperationException("Native Event Gate or state storage fields changed.");
@@ -76,6 +82,11 @@ namespace Sevo.Framework.Runtime
                 var allocate = Require(resources, "OnAllocateResources", true, nothing);
                 var reload = Require(resources, "OnGameReload", true, nothing);
                 var binding = Require(gate, "SetStateData", false, nothing);
+                var removePredecessor = Require(gate, "OnPredecessorRemoved", false, nothing, "VoxelEngine.ICommand");
+                var releaseTargets = Require("VoxelEngine.CommandCommon", "ReleaseTargets", true, nothing,
+                    "VoxelEngine.ICommandLinkSource", "VoxelEngine.BrickUnspawnMode");
+                var removeTarget = Require("VoxelEngine.CommandCommon", "RemoveTarget", true, "VoxelEngine.ICommandLinkSource",
+                    "VoxelEngine.ICommandLinkSource", "VoxelEngine.ICommand", flag);
                 var configuration = Require(gate, "OpenConfigWindow", false, nothing);
                 var loaded = Require(gate, "OnEntityInitialized", false, nothing, flag);
                 var writer = Require(gate, "GetCustomData", false, "System.Byte[]", flag);
@@ -100,6 +111,9 @@ namespace Sevo.Framework.Runtime
                 if (ReplacesBindings(allocate) || ReplacesBindings(reload)
                     || !Calls(allocate, "System.Reflection.Assembly", "GetTypes")
                     || !References(allocate, resources, "FieldInfos") || !References(allocate, resources, "CommandStateDataFields")
+                    || !Calls(removePredecessor, gate, "SetStateData")
+                    || !Calls(releaseTargets, "VoxelEngine.ICommandLinkSource", "OnTargetRemoved")
+                    || !Calls(removeTarget, "VoxelEngine.ICommandLinkSource", "OnTargetRemoved")
                     || !References(binding, resources, "FieldInfos") || !References(binding, resources, "TypeFields")
                     || !Calls(configuration, "System.Type", "GetFields") || !Calls(configuration, "System.Attribute", "GetCustomAttributes")
                     || !Calls(binding, save, "get_eventSelected") || !Calls(loaded, gate, "SetStateData")
