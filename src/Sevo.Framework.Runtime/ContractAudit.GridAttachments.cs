@@ -35,6 +35,9 @@ namespace Sevo.Framework.Runtime
                 var edited = ContextMethod(module, "VoxelEngine.Command", "OnEdited", false, @void);
                 var raycast = ContextMethod(module, "VoxelEngine.VoxelRaycast", "Raycast", false, boolean,
                     "UnityEngine.Ray", "VoxelEngine.VoxelRaycastHit&", "System.Single", parent, "System.Int32");
+                var worldPosition = ContextMethod(module, "VoxelEngine.BrickCoord", "get_WorldPosition", false, "UnityEngine.Vector3");
+                var worldUp = ContextMethod(module, "VoxelEngine.BrickCoord", "get_WorldUp", false, "UnityEngine.Vector3");
+                var setGridId = ContextMethod(module, magLock + "/MagLockData", "set_entitySGUID", false, @void, "System.String");
                 var parentOn = ContextMethod(module, rigidbody, "ParentOn", false, @void, entity,
                     "UnityEngine.Vector3", "UnityEngine.Quaternion");
                 var unparent = ContextMethod(module, rigidbody, "UnParent", false, @void);
@@ -42,6 +45,12 @@ namespace Sevo.Framework.Runtime
                 var mass = ContextMethod(module, rigidbody, "get_Mass", false, "System.Single");
                 if (data == null || target == null || !activate.IsPublic || !raycast.IsPublic
                     || !ContextCalls(activate, raycast) || !ContextCalls(activate, canLock) || !ContextCalls(activate, edited)
+                    || !ContextCalls(activate, worldPosition) || !ContextCalls(activate, worldUp)
+                    || !ContextCalls(activate, setGridId)
+                    || !UsesAttachmentField(activate, Code.Ldsfld, "VoxelEngine.VoxelPhysics", "BuildItem")
+                    || !UsesAttachmentField(activate, Code.Ldfld, parent, "SGUID")
+                    || !activate.Body.Instructions.Any(instruction => instruction.OpCode.Code == Code.Ldc_R4
+                        && instruction.Operand is float range && range == 8f)
                     || !ContextCalls(canLock, isParented) || !ContextCalls(canLock, mass)
                     || !UsesAttachmentField(canLock, Code.Ldfld, rigidbody, "dockedEntities")
                     || !UsesAttachmentField(activate, Code.Stfld, magLock, data.Name)

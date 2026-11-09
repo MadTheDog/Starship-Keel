@@ -7,6 +7,8 @@
     <ProjectReference Include="../../src/Sevo.Framework.Runtime/Sevo.Framework.Runtime.csproj" Private="false" />
     <Reference Include="BepInEx" HintPath="../../.refs/bepinex/BepInEx.dll" Private="false" />
     <Reference Include="0Harmony" HintPath="../../.refs/bepinex/0Harmony.dll" Private="false" />
+    <Reference Include="Unity.Collections" HintPath="../../.refs/game/Unity.Collections.dll" Private="false" />
+    <Reference Include="Mirror" HintPath="../../.refs/game/Mirror.dll" Private="false" />
     <Reference Include="Assembly-CSharp" HintPath="../../.refs/game/Assembly-CSharp.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="../../.refs/game/UnityEngine.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="../../.refs/game/UnityEngine.CoreModule.dll" Private="false" />

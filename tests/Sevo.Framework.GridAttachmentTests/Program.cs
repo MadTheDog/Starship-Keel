@@ -39,8 +39,20 @@ void WithMissingCall(string type, string methodName, string callee)
 
 const string magLock = "VoxelEngine.SystemMagLock";
 WithMissingCall(magLock, "Activate", "CanLock");
+WithMissingCall(magLock, "Activate", "get_WorldUp");
+WithMissingCall(magLock, "Activate", "set_entitySGUID");
 WithMissingCall(magLock, "CanLock", "get_isParented");
 WithMissingCall(magLock, "SetLockedEntity", "ParentOn");
 WithMissingCall(magLock, "UnlockCurrent", "UnParent");
 WithMissingCall(magLock, "OnLoadingSequenceFinished", "SetLockedEntity");
+using var runtime = AssemblyDefinition.ReadAssembly(typeof(ContractAudit).Assembly.Location);
+var service = runtime.MainModule.GetType("Sevo.Framework.Runtime.GridAttachmentService");
+Check(service.Methods.Any(method => method.Name == "Enable"), "Mag-Lock setup enables the stock request service directly.");
+Check(!service.Methods.Where(method => method.HasBody).SelectMany(method => method.Body.Instructions)
+    .Any(instruction => instruction.Operand is MethodReference target
+        && target.DeclaringType.Namespace == "HarmonyLib"),
+    "Mag-Lock setup and execution must not detour native methods.");
+var attach = service.Methods.Single(method => method.Name == "TryRequestAttach");
+Check(attach.Parameters[1].IsOut && attach.Parameters[1].ParameterType.FullName == "System.String&",
+    "Acquisition reports the native recorded target without offering an explicit-target guarantee.");
 Console.WriteLine("Grid attachment contract checks passed.");

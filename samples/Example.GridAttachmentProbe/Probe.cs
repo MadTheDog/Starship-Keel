@@ -9,7 +9,7 @@ namespace Sevo.Example.GridAttachmentProbe
 {
     [BepInPlugin(Id, "Keel Grid Attachment Probe", "0.1.0")]
     [BepInDependency(Plugin.Id)]
-    public sealed class Probe : BaseUnityPlugin
+    public sealed partial class Probe : BaseUnityPlugin
     {
         private const string Id = "example.keel.gridattachment";
         private static ConfigEntry<KeyboardShortcut>? attachKey;
@@ -18,12 +18,13 @@ namespace Sevo.Example.GridAttachmentProbe
 
         private void Awake()
         {
+            if (PrepareNativeFixture()) return;
             attachKey = Config.Bind("Probe", "Attach", new KeyboardShortcut(KeyCode.F8),
                 "Request a stock lock on the grid hit by the targeted Mag-Lock.");
             releaseKey = Config.Bind("Probe", "Release", new KeyboardShortcut(KeyCode.F9),
                 "Request release of the targeted Mag-Lock.");
             var targetSguid = Config.Bind("Probe", "ExpectedGridSguid", "",
-                "Optional stable grid ID. The candidate must match it.");
+                "Optional preview filter. The stock command still chooses the acquired grid.");
             ContextActionProvider.Register(Id, "attach", "Attach grid", context =>
                 GridAttachmentService.TryGetCandidate(context.Placement, out _), context =>
             {
@@ -33,8 +34,8 @@ namespace Sevo.Example.GridAttachmentProbe
                     Logger.LogInfo("Grid attachment probe skipped an unexpected target.");
                     return;
                 }
-                if (GridAttachmentService.TryRequestAttach(context.Placement, grid))
-                    Logger.LogInfo("Native Mag-Lock attach request recorded.");
+                if (GridAttachmentService.TryRequestAttach(context.Placement, out var recordedGridId))
+                    Logger.LogInfo($"Native Mag-Lock attach request recorded for {recordedGridId}.");
             });
             ContextActionProvider.Register(Id, "release", "Release grid", context =>
                 GridAttachmentService.TryGetAttachedGrid(context.Placement, out _), context =>

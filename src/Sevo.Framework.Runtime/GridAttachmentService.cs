@@ -1,9 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using Game;
-using HarmonyLib;
 using Manager;
 using UnityEngine;
 using VoxelEngine;
@@ -14,12 +11,13 @@ namespace Sevo.Framework.Runtime
     public static class GridAttachmentService
     {
         private const float NativeAcquisitionRange = 8f;
-        private static readonly Dictionary<SystemMagLock, string?> Pending = new Dictionary<SystemMagLock, string?>();
         private static FieldInfo? dataField;
         private static FieldInfo? lockedField;
         private static Action<string>? report;
-        private static SystemMagLock? requesting;
-        private static ParentEntity? expectedGrid;
+        private static bool requesting;
+        private static SystemMagLock? pendingMount;
+        private static string? pendingGridId;
+        private static bool pendingRelease;
 
         /// <summary>Returns the live grid under the mount's stock acquisition ray before eligibility checks.</summary>
         public static bool TryGetCandidate(BrickCoord mount, out ParentEntity? candidate)
@@ -28,24 +26,24 @@ namespace Sevo.Framework.Runtime
             return TryResolveMount(mount, out var command) && TryFindCandidate(command!, out candidate);
         }
 
-        /// <summary>Returns true if the native command recorded a request. Query the live attachment after synchronization.</summary>
-        public static bool TryRequestAttach(BrickCoord mount, ParentEntity target)
+        /// <summary>Runs native acquisition and reports the recorded grid ID. The stock activation chooses the target.</summary>
+        public static bool TryRequestAttach(BrickCoord mount, out string? recordedGridId)
         {
-            if (!TryResolveMount(mount, out var command) || requesting != null || !IsLiveGrid(target)
-                || target.Rigidbody.isParented || Pending.ContainsKey(command!)
-                || ReadData(command!).isLockingEntity || Pending.Values.Contains(target.SGUID, StringComparer.Ordinal)
-                || !TryFindCandidate(command!, out var candidate) || !ReferenceEquals(candidate, target))
+            recordedGridId = null;
+            if (!TryResolveMount(mount, out var command) || requesting || HasPendingRequest()
+                || ReadData(command!).isLockingEntity || lockedField!.GetValue(command) != null
+                || !TryFindCandidate(command!, out var candidate) || candidate!.Rigidbody.isParented)
                 return false;
-            return Request(command!, target, target.SGUID);
+            return Request(command!, false, out recordedGridId);
         }
 
         /// <summary>Requests a native release. The stock command clears its saved attachment on acceptance.</summary>
         public static bool TryRequestRelease(BrickCoord mount)
         {
-            if (!TryResolveMount(mount, out var command) || requesting != null || Pending.ContainsKey(command!)
+            if (!TryResolveMount(mount, out var command) || requesting || HasPendingRequest()
                 || !ReadData(command!).isLockingEntity)
                 return false;
-            return Request(command!, null, null);
+            return Request(command!, true, out _);
         }
 
         /// <summary>Returns the attached grid after the native lock has been applied.</summary>
@@ -60,29 +58,21 @@ namespace Sevo.Framework.Runtime
             return true;
         }
 
-        internal static void Install(Harmony harmony, Action<string> log)
+        internal static void Enable(Action<string> log)
         {
             var type = typeof(SystemMagLock);
             var data = RequireField(type, "magLockData", typeof(SystemMagLock.MagLockData));
-            var attached = RequireField(type, "entityLocked", typeof(ParentEntity));
-            harmony.Patch(AccessTools.Method(type, "CanLock", new[] { typeof(ParentEntity) }),
-                prefix: new HarmonyMethod(typeof(GridAttachmentService), nameof(BeforeCanLock)));
-            harmony.Patch(AccessTools.Method(type, "SetLockedEntity", new[] { typeof(bool) }),
-                postfix: new HarmonyMethod(typeof(GridAttachmentService), nameof(AfterNativeCompletion)));
-            harmony.Patch(AccessTools.Method(type, nameof(SystemMagLock.OnDestroy), new[] { typeof(BrickUnspawnMode) }),
-                postfix: new HarmonyMethod(typeof(GridAttachmentService), nameof(AfterNativeCompletion)));
-            report = log;
-            lockedField = attached;
+            lockedField = RequireField(type, "entityLocked", typeof(ParentEntity));
             dataField = data;
+            report = log;
         }
 
         internal static void Disable()
         {
             dataField = lockedField = null;
-            requesting = null;
-            expectedGrid = null;
+            requesting = false;
             report = null;
-            Pending.Clear();
+            ClearPendingRequest();
         }
 
         private static FieldInfo RequireField(Type type, string name, Type fieldType)
@@ -132,21 +122,26 @@ namespace Sevo.Framework.Runtime
             return true;
         }
 
-        private static bool Request(SystemMagLock command, ParentEntity? target, string? sguid)
+        private static bool Request(SystemMagLock command, bool release, out string? recordedGridId)
         {
+            recordedGridId = null;
             var player = Dependency.PlayerManager;
-            if (ReferenceEquals(player, null) || !CommandCommon.IsLocalPlayer(player)) return false;
-            Pending.Add(command, sguid);
-            requesting = command;
-            expectedGrid = target;
-            bool recorded = false;
+            if (player == null || !CommandCommon.IsLocalPlayer(player)) return false;
+
+            var previousGridId = release ? ReadData(command).entitySGUID : null;
+            requesting = true;
             try
             {
-                command.Activate(false, player, target == null ? 0f : 1f);
+                command.Activate(false, player, release ? 0f : 1f);
                 var state = ReadData(command);
-                recorded = target == null ? !state.isLockingEntity
-                    : state.isLockingEntity && string.Equals(state.entitySGUID, sguid, StringComparison.Ordinal);
-                return recorded;
+                if (release ? state.isLockingEntity
+                    : !state.isLockingEntity || string.IsNullOrEmpty(state.entitySGUID))
+                    return false;
+                if (!release) recordedGridId = state.entitySGUID;
+                pendingMount = command;
+                pendingGridId = release ? previousGridId : recordedGridId;
+                pendingRelease = release;
+                return true;
             }
             catch (Exception exception)
             {
@@ -155,24 +150,37 @@ namespace Sevo.Framework.Runtime
             }
             finally
             {
-                requesting = null;
-                expectedGrid = null;
-                if (!recorded) Pending.Remove(command);
+                requesting = false;
             }
+        }
+
+        private static bool HasPendingRequest()
+        {
+            var command = pendingMount;
+            if (command == null) return false;
+            if (TryResolveMount(command.brickCoord, out var live) && ReferenceEquals(live, command)
+                && !string.IsNullOrEmpty(pendingGridId)
+                && BlockEntityManager.instance.GetEntityBySGUID(pendingGridId) is ParentEntity target
+                && IsLiveGrid(target))
+            {
+                bool applied = target.Rigidbody.isParented && ReferenceEquals(target.Rigidbody.parentedOnMagLock, command);
+                var state = ReadData(command);
+                if (pendingRelease ? applied && !state.isLockingEntity
+                    : !applied && state.isLockingEntity && string.Equals(state.entitySGUID, pendingGridId, StringComparison.Ordinal))
+                    return true;
+            }
+            ClearPendingRequest();
+            return false;
+        }
+
+        private static void ClearPendingRequest()
+        {
+            pendingMount = null;
+            pendingGridId = null;
+            pendingRelease = false;
         }
 
         private static SystemMagLock.MagLockData ReadData(SystemMagLock command)
             => (SystemMagLock.MagLockData)dataField!.GetValue(command)!;
-
-        private static bool BeforeCanLock(SystemMagLock __instance, ParentEntity __0, ref bool __result)
-        {
-            if (!ReferenceEquals(requesting, __instance)
-                || (ReferenceEquals(expectedGrid, __0) && IsLiveGrid(__0)))
-                return true;
-            __result = false;
-            return false;
-        }
-
-        private static void AfterNativeCompletion(SystemMagLock __instance) => Pending.Remove(__instance);
     }
 }
