@@ -5,6 +5,7 @@ using BepInEx;
 using Manager;
 using Mirror;
 using Sevo.Framework.Runtime;
+using Unity.Mathematics;
 using UnityEngine;
 using VoxelEngine;
 using World;
@@ -93,13 +94,14 @@ namespace Sevo.Example.TerrainEditProbe
             if (!autoArmed || Time.realtimeSinceStartup < nextAttempt || !TerrainEditService.IsAvailable
                 || !GameloopManager.IsMainThread || GameloopManager.IsNativeContainerAccessUnsafe
                 || PlayerState.InLoadingScreen || PlayerState.IsQuittingToDesktopOrTitle
-                || PlayerState.SystemEntered || PlayerState.InMenu
+                || PlayerState.SystemEntered
                 || PlayerState.sessionMode != PlayerState.SessionMode.solo || PlayerState.gameMode != PlayerState.GameMode.creative
                 || !NetworkServer.active || !NetworkServer.dontListen
                 || Dependency.PlayerManager == null || !Dependency.PlayerManager.isLocalPlayer
                 || Dependency.PlayerManager.Health.IsRespawning)
                 return;
-            if (autoPhase == AutoPhase.Approach && GameIntroductionResources.instance?.Medbay?.inAnimation != false)
+            if (autoPhase == AutoPhase.Approach
+                && (PlayerState.InMenu || GameIntroductionResources.instance?.Medbay?.inAnimation != false))
                 return;
             safeSteps++;
 
@@ -189,9 +191,10 @@ namespace Sevo.Example.TerrainEditProbe
         {
             hit = default;
             node = default;
-            var ray = new VoxelRaycast { includePlayer = false };
             var table = OctreeNodeResources.OctreeNodeDatas;
-            if (!table.IsCreated || !ray.Raycast(origin, -outward, out hit, range)
+            const uint terrainLayer = 64u; // Stock WorldColliderType.terrainNode layer.
+            if (!table.IsCreated || !SkyPhysics.QueryRaycast.Raycast(PositionManager.ToSystemPosition(origin),
+                    (float3)(-outward), range, terrainLayer, SkyPhysics.CONTEXT, out hit)
                 || hit.type != VoxelRaycastHit.Type.newTerrain || hit.elementId <= 0 || hit.elementId >= table.Length
                 || PlanetCommon.IsUnderwater(hit.SystemPosition))
                 return false;
