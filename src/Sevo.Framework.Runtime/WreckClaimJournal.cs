@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Sevo.Framework.Runtime
 {
@@ -53,6 +54,72 @@ namespace Sevo.Framework.Runtime
         }
     }
 
+    internal sealed class WreckClaimStockSource
+    {
+        internal readonly ulong BodySeed;
+        internal readonly ulong TreeGuid;
+        internal readonly byte[]? OldBodyHash;
+        internal readonly byte[]? OldMetadataHash;
+
+        internal WreckClaimStockSource(ulong bodySeed, ulong treeGuid, byte[]? oldBodyHash, byte[]? oldMetadataHash)
+        {
+            if (bodySeed == 0 || treeGuid == 0 || (oldBodyHash == null) != (oldMetadataHash == null)
+                || oldBodyHash is { Length: not 32 } || oldMetadataHash is { Length: not 32 })
+                throw new IOException("Invalid stock wreck source identity or saved payload.");
+            BodySeed = bodySeed;
+            TreeGuid = treeGuid;
+            OldBodyHash = oldBodyHash;
+            OldMetadataHash = oldMetadataHash;
+        }
+
+        internal string MarkerName(ulong worldSeed, string system)
+        {
+            using var buffer = new MemoryStream();
+            using var writer = new BinaryWriter(buffer);
+            writer.Write(worldSeed);
+            writer.Write(system);
+            writer.Write(BodySeed);
+            writer.Write(TreeGuid);
+            writer.Flush();
+            return ".keel-stock-wreck-" + BitConverter.ToString(WreckClaimFiles.Digest(buffer.ToArray())).Replace("-", "");
+        }
+
+        internal static byte[] MarkerBytes(string identity) => Encoding.ASCII.GetBytes(identity);
+
+        internal static string ReadMarker(string path)
+        {
+            var identity = Encoding.ASCII.GetString(WreckClaimFiles.Read(path, 99));
+            if (!WreckClaimJournal.IsIdentity(identity)) throw new IOException("Invalid stock wreck retirement marker.");
+            return identity;
+        }
+
+        internal static string? ReadMarkerIfPresent(string path)
+        {
+            try { return ReadMarker(path); }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
+        }
+
+        // The staged replacement stays intact in the accepted journal. Retiring each old
+        // component is independently retryable, including after one replacement file exists.
+        internal void RetireOldPayload(string body, string metadata, (byte[] Body, byte[] Metadata) replacement)
+        {
+            bool retireBody = IsOldPayload(body, replacement.Body, OldBodyHash);
+            bool retireMetadata = IsOldPayload(metadata, replacement.Metadata, OldMetadataHash);
+            if (retireBody) File.Delete(body);
+            if (retireMetadata) File.Delete(metadata);
+        }
+
+        private static bool IsOldPayload(string path, byte[] replacement, byte[]? expected)
+        {
+            if (!File.Exists(path)) return false;
+            var bytes = WreckClaimFiles.Read(path, WreckClaimJournal.MaxBody);
+            if (bytes.SequenceEqual(replacement)) return false;
+            if (expected != null && WreckClaimFiles.Digest(bytes).SequenceEqual(expected)) return true;
+            throw new IOException("A conflicting stock wreck payload exists.");
+        }
+    }
+
     internal sealed class WreckClaimJournal
     {
         internal const int MaxBody = 16 * 1024 * 1024;
@@ -65,6 +132,7 @@ namespace Sevo.Framework.Runtime
         internal readonly string System;
         internal readonly (long X, long Y, long Z) Position;
         internal readonly (float X, float Y, float Z, float W) Rotation;
+        internal readonly WreckClaimStockSource? StockSource;
         private readonly Guid profile;
         private readonly string character;
         private readonly ulong seed;
@@ -72,7 +140,8 @@ namespace Sevo.Framework.Runtime
         private readonly byte[] metadataHash;
 
         internal WreckClaimJournal(Guid profile, string character, ulong seed, string system, string identity,
-            (long, long, long) position, (float, float, float, float) rotation, byte[] bodyHash, byte[] metadataHash)
+            (long, long, long) position, (float, float, float, float) rotation, byte[] bodyHash, byte[] metadataHash,
+            WreckClaimStockSource? stockSource = null)
         {
             this.profile = profile;
             this.character = character;
@@ -81,6 +150,7 @@ namespace Sevo.Framework.Runtime
             Identity = identity;
             Position = position;
             Rotation = rotation;
+            StockSource = stockSource;
             this.bodyHash = bodyHash;
             this.metadataHash = metadataHash;
             double norm = (double)Rotation.X * Rotation.X + (double)Rotation.Y * Rotation.Y
@@ -103,7 +173,7 @@ namespace Sevo.Framework.Runtime
         {
             using var buffer = new MemoryStream();
             using var writer = new BinaryWriter(buffer);
-            writer.Write(1);
+            writer.Write(StockSource == null ? 1 : 2);
             writer.Write(profile.ToByteArray());
             writer.Write(character);
             writer.Write(seed);
@@ -118,6 +188,17 @@ namespace Sevo.Framework.Runtime
             writer.Write(Rotation.W);
             writer.Write(bodyHash);
             writer.Write(metadataHash);
+            if (StockSource != null)
+            {
+                writer.Write(StockSource.BodySeed);
+                writer.Write(StockSource.TreeGuid);
+                writer.Write(StockSource.OldBodyHash != null);
+                if (StockSource.OldBodyHash != null)
+                {
+                    writer.Write(StockSource.OldBodyHash);
+                    writer.Write(StockSource.OldMetadataHash!);
+                }
+            }
             writer.Flush();
             WreckClaimFiles.Publish(path, buffer.ToArray());
         }
@@ -126,13 +207,27 @@ namespace Sevo.Framework.Runtime
         {
             using var buffer = new MemoryStream(WreckClaimFiles.Read(path, 4096));
             using var reader = new BinaryReader(buffer);
-            if (reader.ReadInt32() != 1 || new Guid(reader.ReadBytes(16)) != profile
+            int version = reader.ReadInt32();
+            if (version is not (1 or 2) || new Guid(reader.ReadBytes(16)) != profile
                 || reader.ReadString() != character || reader.ReadUInt64() != seed)
                 throw new InvalidOperationException("Wreck claim journal belongs to another save or profile.");
-            var journal = new WreckClaimJournal(profile, character, seed, reader.ReadString(), reader.ReadString(),
-                (reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64()),
-                (reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
-                reader.ReadBytes(32), reader.ReadBytes(32));
+            string system = reader.ReadString();
+            string identity = reader.ReadString();
+            var position = (reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64());
+            var rotation = (reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            var bodyHash = reader.ReadBytes(32);
+            var metadataHash = reader.ReadBytes(32);
+            WreckClaimStockSource? stockSource = null;
+            if (version == 2)
+            {
+                ulong bodySeed = reader.ReadUInt64();
+                ulong treeGuid = reader.ReadUInt64();
+                bool hasOldPayload = reader.ReadBoolean();
+                stockSource = new WreckClaimStockSource(bodySeed, treeGuid, hasOldPayload ? reader.ReadBytes(32) : null,
+                    hasOldPayload ? reader.ReadBytes(32) : null);
+            }
+            var journal = new WreckClaimJournal(profile, character, seed, system, identity, position, rotation,
+                bodyHash, metadataHash, stockSource);
             if (buffer.Position != buffer.Length) throw new IOException("Unexpected wreck claim journal data.");
             return journal;
         }

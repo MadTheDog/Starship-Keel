@@ -73,7 +73,10 @@ namespace Sevo.Framework.Runtime
             && FunctionalCommandState.IsSolo && !PlayerState.InLoadingScreen && !PlayerState.IsQuittingToDesktopOrTitle && !PlayerState.InMenu;
 
         internal static bool CanApply(in GridPhysicsContext context)
-            => context.Token != 0 && context.Token == activeToken && remainingForces > 0 && IsSafePhase;
+            => remainingForces > 0 && CanRead(context);
+
+        internal static bool CanRead(in GridPhysicsContext context)
+            => context.Token != 0 && context.Token == activeToken && IsSafePhase;
 
         internal static void ConsumeForce() => remainingForces--;
 

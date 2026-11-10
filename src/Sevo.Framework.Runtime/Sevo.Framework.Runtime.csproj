@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>netstandard2.1</TargetFramework><LangVersion>latest</LangVersion><Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Product>Starship Keel</Product><Version>0.2.1</Version></PropertyGroup>
+  <PropertyGroup><TargetFramework>netstandard2.1</TargetFramework><LangVersion>latest</LangVersion><Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Product>Starship Keel</Product><Version>0.2.3</Version></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sevo.Framework.Sdk\Sevo.Framework.Sdk.csproj" />
     <Reference Include="Mono.Cecil"><HintPath>..\..\.refs\bepinex\Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
@@ -9,6 +9,8 @@
     <Reference Include="Mirror"><HintPath>..\..\.refs\game\Mirror.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>..\..\.refs\game\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>..\..\.refs\game\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>..\..\.refs\game\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath Condition="Exists('..\..\.refs\game\UnityEngine.TextRenderingModule.dll')">..\..\.refs\game\UnityEngine.TextRenderingModule.dll</HintPath><HintPath Condition="!Exists('..\..\.refs\game\UnityEngine.TextRenderingModule.dll')">..\..\lab\game\Starship EVO_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.IMGUIModule"><HintPath Condition="Exists('..\..\.refs\game\UnityEngine.IMGUIModule.dll')">..\..\.refs\game\UnityEngine.IMGUIModule.dll</HintPath><HintPath Condition="!Exists('..\..\.refs\game\UnityEngine.IMGUIModule.dll')">..\..\lab\game\Starship EVO_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Unity.Collections"><HintPath>..\..\.refs\game\Unity.Collections.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Unity.Mathematics"><HintPath>..\..\.refs\game\Unity.Mathematics.dll</HintPath><Private>false</Private></Reference>

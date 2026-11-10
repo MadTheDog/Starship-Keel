@@ -22,6 +22,7 @@ if(args.Length>0 && args[0]=="audit") {
   Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainDepositScanner(current.MainModule),
   Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainPlacement(current.MainModule),
   Sevo.Framework.Runtime.ContractAudit.EvaluateAsteroidDepositCoordinates(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateStockWreckSources(current.MainModule),
   Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainRadialPlacement(current.MainModule)
  }) Console.WriteLine($"{capability.Name}: {capability.Available}; {capability.Reason}");
  var functional=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(current.MainModule);
@@ -36,10 +37,81 @@ if(args.Length>0 && args[0]=="audit") {
  return;
 }
 int checks=0;
+using (var stationContracts = ModuleDefinition.ReadModule(".refs/game/Assembly-CSharp.dll"))
+{
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateStationBuyOffers(stationContracts).Available)
+        throw new Exception("Station buy offers must admit the stock sell path.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateStationStock(stationContracts).Available)
+        throw new Exception("Station stock must admit the stock list and kiosk path.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateOrbitalPoints(stationContracts).Available)
+        throw new Exception("Orbital points must admit the stock catalog and spawn path.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateModFactions(stationContracts).Available)
+        throw new Exception("Mod factions must admit the native faction loading path.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateStationMissions(stationContracts).Available)
+        throw new Exception("Station missions must admit board and saved mission paths.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateSurfaceSites(stationContracts).Available
+        || !Sevo.Framework.Runtime.ContractAudit.EvaluateGeneratedPoiLoot(stationContracts).Available)
+        throw new Exception("Generated sites must admit native blueprint and storage operations.");
+    var parent = stationContracts.GetType("VoxelEngine.ParentEntity");
+    parent.Fields.Single(field => field.Name == "isNewInstance").Name = "ChangedFreshFlag";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateGeneratedPoiLoot(stationContracts).Available)
+        throw new Exception("Generated loot must reject a changed fresh-instance flag.");
+    if (!Sevo.Framework.Runtime.ContractAudit.EvaluateStationServices(stationContracts).Available
+        || !Sevo.Framework.Runtime.ContractAudit.EvaluateStationTraffic(stationContracts).Available)
+        throw new Exception("Station extensions must admit the stock action row and patrol path.");
+    var buttons = stationContracts.GetType("UI.GenericActionButton");
+    buttons.Fields.Single(field => field.Name == "buttonData3").Name = "ChangedServiceSlot";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationServices(stationContracts).Available)
+        throw new Exception("Station services must reject a changed action slot.");
+    var patrol = stationContracts.GetType("Game.NpcSpacePolice");
+    patrol.Methods.Single(method => method.Name == "OnNewStationGenerated").Name = "ChangedPatrolSpawner";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationTraffic(stationContracts).Available)
+        throw new Exception("Station traffic must reject a changed patrol spawner.");
+    var missions = stationContracts.GetType("Game.MissionSaveData");
+    missions.Fields.Single(field => field.Name == "TagByType").Name = "ChangedMissionTags";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationMissions(stationContracts).Available)
+        throw new Exception("Station missions must reject changed saved tags.");
+    var factions = stationContracts.GetType("Game.FactionTerritoryMap");
+    factions.Fields.Single(field => field.Name == "factionsFromMods").Name = "ChangedFactionDefinitions";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateModFactions(stationContracts).Available)
+        throw new Exception("Mod factions must reject a changed mod faction list.");
+    var points = stationContracts.GetType("World.BrickEntityPOIData");
+    points.Fields.Single(field => field.Name == "systemPosition").Name = "ChangedPosition";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateOrbitalPoints(stationContracts).Available)
+        throw new Exception("Orbital points must reject changed native coordinates.");
+    var stationStock = stationContracts.GetType("VoxelEngine.EntityStation");
+    stationStock.Fields.Single(field => field.Name == "itemToSellPrices").Name = "ChangedPriceList";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationStock(stationContracts).Available)
+        throw new Exception("Station stock must reject changed storage for prices.");
+    var page = stationContracts.GetType("Game.UI_StationLandingPage");
+    var sellFilter = page.Methods.Single(method => method.Name == "TryAddTradeableItem");
+    sellFilter.Name = "ChangedSellFilter";
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationBuyOffers(stationContracts).Available)
+        throw new Exception("Station buy offers must reject a changed sell filter.");
+    sellFilter.Name = "TryAddTradeableItem";
+    var trade = page.Methods.Single(method => method.Name == "OnTradeMade");
+    var resale = trade.Body.Instructions.Single(instruction =>
+        instruction.Operand is MethodReference target && target.Name == "GetItemPrice");
+    resale.Previous.Previous.OpCode = Mono.Cecil.Cil.OpCodes.Ldc_I4_0;
+    if (Sevo.Framework.Runtime.ContractAudit.EvaluateStationBuyOffers(stationContracts).Available)
+        throw new Exception("Station buy offers must reject a changed resale direction.");
+    checks += 16;
+}
+
 checks += CelestialLayoutTests.Run();
 checks += OreDiscoveryTests.Run();
 checks += OreDepositTests.Run();
 checks += BodyEnvironmentTests.Run();
+checks += AtmosphereSamplingAuditTests.Run();
+checks += AtmosphereProviderTests.Run();
+checks += ConnectedRailTests.Run();
+checks += AsteroidTerrainEditAuditTests.Run();
+checks += PersistentWaypointTests.Run();
+checks += TerrainAnchorAuditTests.Run();
+checks += TerrainAnchorStateTests.Run();
+checks += TerrainSuspensionTests.Run();
+checks += StockWreckSourceAuditTests.Run();
+checks += StockWreckClaimJournalTests.Run();
 checks += TerrainGenerationProviderTests.Run();
 checks += GalaxyCatalogTests.Run();
 checks += GalaxyCatalogPinTests.Run();

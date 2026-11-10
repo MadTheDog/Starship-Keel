@@ -5,6 +5,7 @@ using BepInEx;
 using Manager;
 using Mirror;
 using Sevo.Framework.Runtime;
+using Sevo.Framework.Sdk;
 using Unity.Mathematics;
 using UnityEngine;
 using VoxelEngine;
@@ -36,6 +37,9 @@ namespace Sevo.Example.TerrainEditProbe
         private float cutDistance;
         private string expectedHash = "";
         private Guid autoId;
+        private bool verifyAnchor;
+        private bool verifyFillMaterial;
+        private TerrainAnchorPose cutAnchor;
 
         private void ArmAutomatedFixture()
         {
@@ -55,6 +59,10 @@ namespace Sevo.Example.TerrainEditProbe
                     throw new InvalidOperationException("Exact verified isolated game path and application identity are required.");
 
                 ProfileProtocol.Open(stateDirectory, Paths.GameRootPath, session);
+                verifyAnchor = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_ANCHOR_FIXTURE") == "1";
+                verifyFillMaterial = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_FILL_MATERIAL_FIXTURE") == "1";
+                if (verifyFillMaterial)
+                    TerrainMaterialRegistration.Register(Id, "fill", 1, "RAW_IRON_A");
                 autoId = Guid.NewGuid();
                 autoPending = true;
             }
@@ -75,12 +83,13 @@ namespace Sevo.Example.TerrainEditProbe
             if (autoArmed && Time.realtimeSinceStartup > autoDeadline)
                 FinishAutomation(false, "timed_out_" + autoPhase);
             if (!autoArmed) UninstallCoarseApproachObserver();
-            if (autoArmed && autoPhase != AutoPhase.Approach && Time.realtimeSinceStartup >= nextStatus)
+            if (autoArmed && Time.realtimeSinceStartup >= nextStatus)
             {
                 nextStatus = Time.realtimeSinceStartup + 10f;
                 Logger.LogInfo($"KEEL_TERRAIN_FIXTURE request={autoId:N} phase={autoPhase} safeSteps={safeSteps}"
                     + $" loading={PlayerState.InLoadingScreen} systemEntered={PlayerState.SystemEntered} menu={PlayerState.InMenu}"
-                    + $" respawning={Dependency.PlayerManager?.Health.IsRespawning}");
+                    + $" respawning={Dependency.PlayerManager?.Health.IsRespawning}"
+                    + $" medbayAnimating={GameIntroductionResources.instance?.Medbay?.inAnimation}");
             }
         }
 
@@ -109,7 +118,7 @@ namespace Sevo.Example.TerrainEditProbe
                 || Dependency.PlayerManager.Health.IsRespawning)
                 return;
             if (autoPhase == AutoPhase.Approach
-                && (PlayerState.InMenu || GameIntroductionResources.instance?.Medbay?.inAnimation != false))
+                && ((!verifyAnchor && PlayerState.InMenu) || GameIntroductionResources.instance?.Medbay?.inAnimation != false))
                 return;
             safeSteps++;
 
@@ -185,7 +194,11 @@ namespace Sevo.Example.TerrainEditProbe
                         Logger.LogInfo(FormattableString.Invariant($"KEEL_TERRAIN_FIXTURE request={autoId:N} descent range={ground.distance:R} nativePointError={hitPointError:R}"));
                         break;
                     case AutoPhase.FindPatch:
-                        Vector3 origin = PositionManager.ToWorldPosition(site) + 12f * up + ScanOffset(up, scanIndex++ % 49, 4f);
+                        int index = scanIndex++;
+                        Vector3 offset = ScanOffset(up, index % 49, 4f);
+                        if (verifyAnchor || verifyFillMaterial)
+                            offset += ScanOffset(up, index / 49 % 49, 0.75f);
+                        Vector3 origin = PositionManager.ToWorldPosition(site) + 12f * up + offset;
                         bool dry = RayDry(origin, up, RayDistance, out var hit, out var node);
                         float slope = dry ? Mathf.Abs(Vector3.Dot(hit.WorldNormal, up)) : 0f;
                         bool interior = dry && IsInterior(node, hit.localPoint);
@@ -270,8 +283,38 @@ namespace Sevo.Example.TerrainEditProbe
         {
             afterHash = "";
             bool fill = operation == ProbeOperation.Fill;
-            var result = TerrainEditService.ApplyPlane(origin, -up, RayDistance, up, fill ? PlaneStep : -PlaneStep,
-                BrushRadius, fill ? TerrainEditOperation.FillBelow : TerrainEditOperation.CutAbove);
+            if (verifyAnchor && !fill)
+            {
+                if (!TerrainAnchor.IsAvailable) throw new InvalidOperationException("Terrain anchor hook unavailable.");
+                var bodies = PlanetarySystem.SolarBodies;
+                var body = bodies[GameIntroductionResources.STARTING_PLANETID];
+                var target = new BodyEnvironmentTarget(body.parentStar.seed, body.Seed);
+                var captured = TerrainAnchor.Capture(target, origin, -up, RayDistance, out cutAnchor);
+                if (captured != TerrainAnchorResult.Resolved)
+                {
+                    if (refusedEdits++ % 16 == 0)
+                    {
+                        var ray = WorldSurfaceQuery.Raycast(origin, -up, RayDistance, false, out var surface);
+                        Logger.LogInfo($"KEEL_TERRAIN_ANCHOR_FIXTURE request={autoId:N} capture={captured} tree={node.treeGuid:x16}"
+                            + $" ray={ray}/{surface.Kind} bodyTransform={body.transformId} nodeTransform={node.transformId}"
+                            + $" dirty={node.isGeoDirty} fade={node.fadeState}");
+                    }
+                    return false;
+                }
+                var rebound = TerrainAnchor.Resolve(cutAnchor, out var point, out _);
+                if (rebound != TerrainAnchorResult.Resolved)
+                {
+                    if (refusedEdits++ % 16 == 0)
+                        Logger.LogInfo($"KEEL_TERRAIN_ANCHOR_FIXTURE request={autoId:N} resolve={rebound} tree={node.treeGuid:x16}");
+                    return false;
+                }
+                if (Vector3.Distance(point, origin - up * hit.distance) > 0.1f)
+                    throw new InvalidOperationException("Terrain anchor resolved away from the original surface ray.");
+            }
+            var result = fill && verifyFillMaterial
+                ? TerrainEditService.ApplyPlaneFillWithMaterial(origin, -up, RayDistance, up, PlaneStep, BrushRadius, Id + ":fill")
+                : TerrainEditService.ApplyPlane(origin, -up, RayDistance, up, fill ? PlaneStep : -PlaneStep,
+                    BrushRadius, fill ? TerrainEditOperation.FillBelow : TerrainEditOperation.CutAbove);
             if (result is TerrainEditResult.TerrainNotReady or TerrainEditResult.NoTerrainHit
                 or TerrainEditResult.NoChange or TerrainEditResult.FrameBudgetUsed)
             {
@@ -281,6 +324,8 @@ namespace Sevo.Example.TerrainEditProbe
             }
             if (result != TerrainEditResult.Queued)
                 throw new InvalidOperationException($"{operation} returned {result}.");
+            if (verifyAnchor && !fill && TerrainAnchor.Resolve(cutAnchor, out _, out _) != TerrainAnchorResult.SurfaceMissing)
+                throw new InvalidOperationException("Queued terrain geometry left the original anchor active.");
             if (!TryRead(hit, out var afterNode, out var after) || afterNode.treeGuid != node.treeGuid
                 || afterNode.densitiesId != node.densitiesId)
                 throw new InvalidOperationException($"{operation} lost the selected native density slot.");
@@ -291,6 +336,23 @@ namespace Sevo.Example.TerrainEditProbe
                 + $" removedSolid={delta.RemovedSolid} addedSolid={delta.AddedSolid}");
             if (!delta.IsAccepted(operation))
                 throw new InvalidOperationException($"{operation} did not produce the expected signed density changes.");
+            if (fill && verifyFillMaterial)
+            {
+                if (!TerrainMaterialRegistration.TryGetId(Id + ":fill", out byte material))
+                    throw new InvalidOperationException("Registered fill material unavailable after edit.");
+                for (int i = 0; i < before.Density.Length; i++)
+                {
+                    int offset = 8 * i + 6;
+                    if (before.Density[i] >= 0 && after.Density[i] < 0)
+                    {
+                        if (after.Packed[offset] != material || after.Packed[offset + 1] != material)
+                            throw new InvalidOperationException("A newly solid sample did not retain the registered material.");
+                    }
+                    else if (before.Packed[offset] != after.Packed[offset] || before.Packed[offset + 1] != after.Packed[offset + 1])
+                        throw new InvalidOperationException("Fill changed the material of a sample that did not become solid.");
+                }
+                Logger.LogInfo($"KEEL_TERRAIN_FILL_MATERIAL_FIXTURE request={autoId:N} material={material} newSolid={delta.AddedSolid}");
+            }
             afterHash = after.Hash;
             return true;
         }
@@ -303,6 +365,13 @@ namespace Sevo.Example.TerrainEditProbe
             if (autoPhase == AutoPhase.RebuiltCut)
             {
                 if (hit.distance <= originalDistance + 0.1f) return;
+                if (verifyAnchor)
+                {
+                    var outcome = TerrainAnchor.Resolve(cutAnchor, out _, out _);
+                    if (outcome != TerrainAnchorResult.SurfaceMissing)
+                        throw new InvalidOperationException("Removed terrain contact returned " + outcome + ".");
+                    Logger.LogInfo($"KEEL_TERRAIN_ANCHOR_FIXTURE request={autoId:N} resolved_before_cut=True invalidated_after_rebuild=True");
+                }
                 cutDistance = hit.distance;
                 if (!TryApplyAutomated(origin, hit, node, snapshot, ProbeOperation.Fill, out var fillHash)) return;
                 expectedHash = fillHash;

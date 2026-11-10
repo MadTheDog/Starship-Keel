@@ -1,5 +1,13 @@
 # Starship Keel changelog
 
+## 0.2.3
+
+- Add an experimental station buy-price hook for mods that sell inventory items to NPC stations. Existing markets keep their stock pricing unless one declaration supplies a quote.
+- Add experimental station stock and kiosk access, service actions, patrol pools, custom mission boards and save tags, faction definitions and reputation, orbital points, surface buildings, and generated POI loot.
+- Use `Release.Large-change.Minor-change` versioning. The station buy-price hook adds an API within the 0.2 compatibility series.
+- Includes the previously unpublished 0.2.2 work on atmosphere sampling and forces, terrain anchors, persistent waypoints and Orrery integration, stock terrain wreck claiming, connected rails, and asteroid terrain editing. See the 0.2.2 development record for verification limits.
+- The station and site hooks passed contract checks and installed together at startup on Steam build 26451593 / 26w45a. In-world transactions, generated sites and fresh-process reload remain unverified. Surface sites use native terrain buildings. Full native station behavior on those sites is still open.
+
 ## 0.2.1
 
 - Add experimental deterministic custom deposits on fresh planet and asteroid terrain using registered material identities.

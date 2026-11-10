@@ -11,7 +11,8 @@ namespace Sevo.Framework.Runtime
     public enum TerrainEditOperation { CutAbove, FillBelow }
     public enum TerrainEditResult
     {
-        Unavailable, InvalidBrush, NoTerrainHit, TerrainNotReady, FrameBudgetUsed, NoChange, Queued, Failed
+        Unavailable, InvalidBrush, NoTerrainHit, TerrainNotReady, FrameBudgetUsed, NoChange, Queued, Failed,
+        MaterialUnavailable
     }
 
     /// <summary>Bounded planar edits of resident native terrain in a managed solo world.</summary>
@@ -21,10 +22,15 @@ namespace Sevo.Framework.Runtime
         private const int MaximumNodes = 8;
         private static Action<string>? warn;
         private static bool enabled;
+        private static bool asteroidsEnabled;
         private static bool reportPreflight;
         private static int lastEditFrame = -1;
 
         public static bool IsAvailable => enabled && WorldSurfaceQuery.IsAvailable;
+        public static bool IsAsteroidEditingAvailable => IsAvailable && asteroidsEnabled;
+
+        internal static void EnableAsteroids() => asteroidsEnabled = true;
+        internal static void DisableAsteroids() => asteroidsEnabled = false;
 
         internal static void Enable(Action<string> logWarning)
         {
@@ -37,6 +43,7 @@ namespace Sevo.Framework.Runtime
         internal static void Disable()
         {
             enabled = false;
+            asteroidsEnabled = false;
             warn = null;
         }
 
@@ -47,6 +54,18 @@ namespace Sevo.Framework.Runtime
         public static TerrainEditResult ApplyPlane(Vector3 rayOrigin, Vector3 rayDirection, float rayDistance,
             Vector3 planeNormal, float planeOffset, float radius, TerrainEditOperation operation,
             ParentEntity? ignoreGrid = null)
+            => ApplyPlaneCore(rayOrigin, rayDirection, rayDistance, planeNormal, planeOffset, radius, operation, null, ignoreGrid);
+
+        /// <summary>Fills below a plane and uses the registered material for newly solid samples.</summary>
+        public static TerrainEditResult ApplyPlaneFillWithMaterial(Vector3 rayOrigin, Vector3 rayDirection, float rayDistance,
+            Vector3 planeNormal, float planeOffset, float radius, string materialKey, ParentEntity? ignoreGrid = null)
+            => string.IsNullOrWhiteSpace(materialKey) ? TerrainEditResult.MaterialUnavailable
+                : ApplyPlaneCore(rayOrigin, rayDirection, rayDistance, planeNormal, planeOffset, radius,
+                    TerrainEditOperation.FillBelow, materialKey, ignoreGrid);
+
+        private static TerrainEditResult ApplyPlaneCore(Vector3 rayOrigin, Vector3 rayDirection, float rayDistance,
+            Vector3 planeNormal, float planeOffset, float radius, TerrainEditOperation operation, string? materialKey,
+            ParentEntity? ignoreGrid)
         {
             if (!IsAvailable) return TerrainEditResult.Unavailable;
             float normalLength = planeNormal.magnitude;
@@ -63,13 +82,21 @@ namespace Sevo.Framework.Runtime
             if (query != WorldSurfaceQueryResult.Hit || hit.type != VoxelRaycastHit.Type.newTerrain)
                 return TerrainEditResult.NoTerrainHit;
 
+            byte? registeredMaterial = null;
+            if (materialKey != null)
+            {
+                if (!TerrainMaterialRegistration.TryGetId(materialKey, out byte id))
+                    return TerrainEditResult.MaterialUnavailable;
+                registeredMaterial = id;
+            }
+
             if (lastEditFrame == Time.frameCount) return TerrainEditResult.FrameBudgetUsed;
             lastEditFrame = Time.frameCount;
 
             try
             {
                 return ApplyResidentPlane(hit, planeNormal / normalLength, planeOffset, radius,
-                    operation == TerrainEditOperation.FillBelow);
+                    operation == TerrainEditOperation.FillBelow, registeredMaterial);
             }
             catch (Exception exception)
             {
@@ -80,14 +107,17 @@ namespace Sevo.Framework.Runtime
         }
 
         private static TerrainEditResult ApplyResidentPlane(VoxelRaycastHit hit, Vector3 worldNormal,
-            float planeOffset, float radius, bool fill)
+            float planeOffset, float radius, bool fill, byte? registeredMaterial)
         {
             var table = OctreeNodeResources.OctreeNodeDatas;
             if (!OctreeNodeResources.saveParsed || !table.IsCreated || hit.elementId <= 0 || hit.elementId >= table.Length)
                 return TerrainEditResult.TerrainNotReady;
 
             var selected = table[hit.elementId];
-            if (selected.transformId != hit.transformId || selected.planetGenerationId == 0 || selected.asteroidId != 0
+            bool asteroid = selected.planetGenerationId == 0 && selected.asteroidId > 0;
+            if (selected.transformId != hit.transformId
+                || (asteroid ? !IsAsteroidEditingAvailable || !IsEditableAsteroid(selected)
+                    : selected.planetGenerationId == 0 || selected.asteroidId != 0)
                 || !IsResident(selected) || selected.ultimateParentId <= 0 || selected.ultimateParentId >= table.Length
                 || hit.TransformData.scale != 1f)
                 return TerrainEditResult.TerrainNotReady;
@@ -109,6 +139,7 @@ namespace Sevo.Framework.Runtime
                 VoxelNodeData fillMaterial = fill
                     ? ReadFillMaterial(selected, hit.localPoint, hit.localNormal)
                     : default;
+                if (registeredMaterial is byte materialId) fillMaterial.texId0 = fillMaterial.texId1 = materialId;
                 if (fill && (fillMaterial.Density >= 0f || !IsMaterialAvailable(fillMaterial)))
                     return TerrainEditResult.TerrainNotReady;
 
@@ -120,7 +151,8 @@ namespace Sevo.Framework.Runtime
                     if (!OctreeNodeResources.ShouldSaveNode((int)node.VoxelSize)) continue;
                     if (!DensityLatticeTouches(node, centre, radius)) continue;
                     if (nodes.Count == MaximumNodes || !IsResident(node) || (id != selected.ultimateParentId && node.ultimateParentId != selected.ultimateParentId)
-                        || node.planetGenerationId != selected.planetGenerationId || node.asteroidId != 0 || !densityIds.Add(node.densitiesId))
+                        || node.planetGenerationId != selected.planetGenerationId || node.asteroidId != selected.asteroidId
+                        || (asteroid && node.transformId != selected.transformId) || !densityIds.Add(node.densitiesId))
                     {
                         if (reportPreflight)
                         {
@@ -160,6 +192,16 @@ namespace Sevo.Framework.Runtime
             {
                 foreach (var node in nodes) node.Dispose();
             }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static bool IsEditableAsteroid(OctreeNodeData node)
+        {
+            var rows = AsteroidResources.datas;
+            if (!rows.IsCreated || node.asteroidId >= rows.Length) return false;
+            var asteroid = rows[node.asteroidId];
+            return asteroid.guid != 0 && !asteroid.isBaked
+                && asteroid.transformId == node.transformId && asteroid.parentNodeId == node.ultimateParentId;
         }
 
         private static bool DensityLatticeTouches(OctreeNodeData node, Vector3 centre, float radius)
@@ -226,10 +268,14 @@ namespace Sevo.Framework.Runtime
                     var next = original;
                     float density = TerrainEditMath.Combine(original.Density,
                         (offset.magnitude - radius) / scale, (Vector3.Dot(offset, normal) - planeOffset) / scale, fill);
-                    if (fill && original.Density >= 0f && density < 0f)
-                        next = fillMaterial;
                     next.Density = density;
                     if (next.density == original.density) continue;
+                    if (fill && original.density >= 0 && next.density < 0)
+                    {
+                        short packedDensity = next.density;
+                        next = fillMaterial;
+                        next.density = packedDensity;
+                    }
                     if (!Changed) originals = new NativeArray<VoxelNodeData>(samples, Allocator.Temp);
                     samples[index] = next;
                     Changed = true;

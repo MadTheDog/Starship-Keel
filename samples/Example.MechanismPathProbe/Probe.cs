@@ -1,3 +1,4 @@
+#nullable enable
 using System.Numerics;
 using BepInEx;
 using Sevo.Framework.Runtime;
@@ -13,14 +14,21 @@ namespace Sevo.Example.MechanismPathProbe
         private void Awake()
         {
             var label = Config.Bind("Probe", "SliderLabel", "keel-path-probe", "Only the tagged slider follows the test path.");
+            var builtInSweep = Config.Bind("Probe", "UseBuiltInSweep", false,
+                "Use Keel's conservative collider sweep on the authored corner.");
             PrepareAutomation();
-            MechanismPathProvider.Register(Id, "corner", context =>
+            if (builtInSweep.Value)
+                MechanismPathProvider.RegisterConnectedRail(Id, "corner", SelectPath);
+            else
+                MechanismPathProvider.Register(Id, "corner", SelectPath, context => Selected(context, label.Value));
+
+            MechanismPath? SelectPath(MechanismPathContext context)
             {
                 if (!Selected(context, label.Value) || context.TravelLength < 0.1f) return null;
                 var corner = Vector3.UnitX * (context.TravelLength * 0.5f);
                 var end = corner + Vector3.UnitZ * (context.TravelLength * 0.5f);
-                return new MechanismPath(new[] { Vector3.Zero, corner, end });
-            }, context => Selected(context, label.Value));
+                return MechanismPath.FromConnectedRail(new[] { Vector3.Zero, corner, end });
+            }
         }
     }
 }

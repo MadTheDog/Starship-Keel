@@ -32,6 +32,8 @@ Keel 0.2.0 adds opt-in [body environment](docs/KEEL-BODY-ENVIRONMENT.md), [celes
 
 The release also includes [native block variants](docs/KEEL-NATIVE-BLOCK-VARIANTS.md), [context actions and inventory views](docs/KEEL-CONTEXT-INTERACTIONS.md), [seated poses and dismounts](docs/KEEL-SEAT-INTERACTIONS.md), [surface queries and terrain edits](docs/KEEL-WORLD-SURFACES.md), [assemblies and powered machine work rates](docs/KEEL-BLOCK-ASSEMBLIES.md), [grid physics](docs/KEEL-GRID-PHYSICS.md), [slider paths](docs/KEEL-MECHANISM-PATHS.md), [transfer links](docs/KEEL-TRANSFER-LINKS.md), [player-owned grid recovery](docs/KEEL-GRID-RECOVERY.md), and [claiming mod-owned transient NPC wrecks](docs/KEEL-WRECK-CLAIM.md). Their individual guides describe the supported contracts.
 
+Keel 0.2.3 adds experimental [station and generated site hooks](docs/KEEL-STATION-CONTENT.md) for markets, kiosks, services, patrol pools, orbital POIs, terrain buildings, loot, missions, and factions in managed solo profiles.
+
 See the experimental [grid attachment requests](docs/KEEL-GRID-ATTACHMENTS.md), [grid destruction notifications](docs/KEEL-GRID-DESTRUCTION.md), [navigation and vehicle assistance](docs/KEEL-NAVIGATION.md), [sublight control leases](docs/KEEL-SUBLIGHT-CONTROL.md), [camera follow leases](docs/KEEL-CAMERA-VIEW.md), [logic outputs](docs/KEEL-LOGIC-OUTPUTS.md), and the separate [HoverRail guide sample](samples/Example.HoverRailGuide/README.md).
 
 The test target is Windows x64 Mono, **Steam build 26451593 / 26w45a**, Unity **6000.6.6f1**. Keel evaluates required methods, layouts, and lifecycle hooks at runtime. Its BepInEx plugin ID is `local.sevo.modplatform`.

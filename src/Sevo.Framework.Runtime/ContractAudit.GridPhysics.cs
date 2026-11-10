@@ -8,6 +8,26 @@ namespace Sevo.Framework.Runtime
 {
     public static partial class ContractAudit
     {
+        public static CapabilityResult EvaluateGridPointMotion(ModuleDefinition module)
+        {
+            const string name = "gridPointMotion";
+            const string data = "Manager.SkyRigidbody/Data";
+            const string velocity = "Unity.Mathematics.float3";
+            var native = Method(module, data, "VelocityAtSystemPoint", false, "UnityEngine.Vector3", "Vector3l");
+            bool available = native?.IsPublic == true && native.HasBody
+                && native.Body.Instructions.Any(i => SurfaceField(i, Code.Ldfld, data, "linearVelocity", velocity))
+                && native.Body.Instructions.Any(i => SurfaceField(i, Code.Ldfld, data, "angularVelocity", velocity))
+                && native.Body.Instructions.Any(i => i.OpCode.Code == Code.Call && i.Operand is MethodReference method
+                    && method.FullName == "Unity.Mathematics.float3 Unity.Mathematics.math::cross(Unity.Mathematics.float3,Unity.Mathematics.float3)")
+                && native.Body.Instructions.Any(i => i.OpCode.Code == Code.Call && i.Operand is MethodReference method
+                    && method.FullName == "Vector3l Manager.SkyRigidbody/Data::get_GetComSystemPosition()")
+                && !native.Body.Instructions.Any(i => i.Operand is MethodReference method
+                    && method.DeclaringType.FullName == "PositionManager");
+            return new CapabilityResult(name, available, available
+                ? "Native system-point velocity includes both linear and angular motion."
+                : "Native system-point velocity or frame contract changed.");
+        }
+
         public static CapabilityResult EvaluateGridPhysics(ModuleDefinition module)
         {
             const string capability = "gridPhysics";

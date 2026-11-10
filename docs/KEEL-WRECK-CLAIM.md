@@ -1,4 +1,6 @@
-# Claim a transient NPC wreck
+# Claim a wreck
+
+## Mod-owned transient NPC wrecks
 
 Keel 0.2.0 exposes an experimental ownership handoff in managed solo Creative and Survival profiles. Enable `[Experimental] EnableWreckClaim` or set `SEVO_KEEL_EXPERIMENTAL_WRECK_CLAIM=1`. Check the `wreckClaim` runtime capability before offering a claim action.
 
@@ -17,4 +19,21 @@ A true return means Keel staged a validated snapshot before retiring the source.
 
 Keep the native character directory intact during a pending operation. When the same managed profile and character revisit the original system, Keel reopens its journal, verifies the snapshot, and uses the stock index to avoid a second live grid. It can resume an incomplete write of its own exact payload. A conflicting file, unexpected live grid, or unreadable stock index holds the operation for inspection. One claim can be pending per character.
 
-The ownership handoff leaves the ship defeated. A mod can separately request [grid recovery](KEEL-GRID-RECOVERY.md) once the game allows it. Stock-generated terrain wrecks, crewed encounters, and persistent or independently respawning NPCs require separate lifecycle support. See the [disposable probe](../samples/Example.WreckClaimProbe/README.md) for the in-game checks.
+The ownership handoff leaves the ship defeated. A mod can separately request [grid recovery](KEEL-GRID-RECOVERY.md) once the game allows it. Crewed encounters and persistent or independently respawning NPCs require separate lifecycle support. See the [disposable probe](../samples/Example.WreckClaimProbe/README.md) for the transient in-game checks.
+
+## Stock terrain wrecks
+
+Keel 0.2.2 adds an experimental claim for procedural terrain wrecks in managed solo profiles. Enable both `EnableWreckClaim` and `EnableStockWreckClaim`, or their `SEVO_KEEL_EXPERIMENTAL_WRECK_CLAIM` and `SEVO_KEEL_EXPERIMENTAL_STOCK_WRECK_CLAIM` environment flags. Check `stockWreckClaim` or `WreckClaimService.IsStockClaimAvailable` before offering the action. A salvage permit mod can award the transfer on inspection. A mission mod can use the same handoff after the player earns a recovery reward.
+
+```csharp
+if (WreckClaimService.TryClaimStockTerrainWreck(wreck, recoveryPose, out var operation))
+{
+    // Keep operation.PersistentId and poll operation.State on the game thread.
+}
+```
+
+Supply a clear-space `WorldTransform` in the current system's native coordinates. The stock source must be a loaded, defeated procedural ship with an audited terrain-node attachment and no crew, pilot, mission or docking links. The starter wreck is outside this contract. The replacement retains the persistent ID and defeat state. A mod can separately request grid recovery after the transfer.
+
+The accepted journal protects the exact source from both fresh generation and saved terrain load. It stages a validated player-owned replacement and records any prior stock payload before retirement. If the game stops partway through the transfer, reopen the same character and system in the originating managed profile to resume. A conflicting native file or an unrecognized grid with the same ID pauses recovery for inspection.
+
+Keep the character's Keel retirement markers alongside its native saves. Existing retirement protection stays active when new claims are disabled. A save containing stock claims requires a Keel-managed solo session with the retirement hooks admitted. Automated checks cover journal replay and rejection of incompatible native contracts. Stock wreck claiming, streaming, and fresh-process reload still need in-game verification on Steam build 26451593 / 26w45a.

@@ -6,7 +6,15 @@ A provider receives the slider placement and its native travel length in metres.
 
 Keel selects the route during native child creation or reconstruction. A bound route keeps its mapping through movement, stopping, and rollback. An optional `canMove` predicate can stop a bound route if the rail layout becomes invalid. Retain the same provider selection and exact path on reload. If rail parts disappear, continue to reconstruct the route and return false from `canMove` until the parts are restored. The path hook does not encode route geometry in the save or reconstruct a route from missing parts. Changing the selected path for an existing off-axis save and opening that save without its provider are outside this preview.
 
-The game retains ownership of the child grid, native pose publication, position targets, mass-based speed, and collision rollback. Keel limits per-update travel and prevents a step from crossing a corner. Native checks test successive poses. They do not prove a continuous collision sweep. Native straight extension stacks are outside this preview. A bound slider stops when an extension stack is present, and the stock shipyard instant state operation is suppressed for bound sliders.
+The game retains ownership of the child grid, native pose publication, position targets, mass-based speed, and collision rollback. Keel limits per-update travel and prevents a step from crossing a corner. The original `Register` overload stops when a bound slider has an extension stack. The stock shipyard instant state operation is suppressed for bound sliders.
+
+## Connected rails
+
+Enable `EnableConnectedRails` or `SEVO_KEEL_EXPERIMENTAL_CONNECTED_RAILS=1` alongside mechanism paths. `MechanismPath.FromConnectedRail` accepts straight and right-angle joins. `RegisterConnectedRail(owner, name, selectPath, canSweep)` maps the native extension travel onto those junctions. Distance starts at the negative end. Keel subtracts the path offset at the native home distance so the stock home pose stays fixed. A bound slider stops if the extension counts or grid size change. The callback receives the carriage and proposed offsets for the entire bounded movement.
+
+Also enable `EnableStockRailTools` or `SEVO_KEEL_EXPERIMENTAL_STOCK_RAIL_TOOLS=1` to opt into the native collider queries. `TryDiscoverStockStraightRail(slider, out path)` reads the slider's two live stock extension chains on the main thread in a safe solo phase. A provider may call the equivalent method on its selection context when the links are already available. The native game creates links asynchronously on load, so discovery may fail until the links settle. Stock parts provide one straight axis. A mod must supply corner junctions.
+
+The three-argument `RegisterConnectedRail` overload uses Keel's conservative clearance check. It queries the native brick and triangle collider index for the swept bounds of the carriage and its nested child grids. It rejects unknown candidates, docked payloads, unsupported scales, unavailable snapshots and oversized bounds. It may stop at an empty part of a payload's bounding box. Candidate data comes from the current native collider snapshot. Native collider publication, in-game obstruction tests and fresh-process off-axis reload still need live validation.
 
 ## In-game acceptance
 

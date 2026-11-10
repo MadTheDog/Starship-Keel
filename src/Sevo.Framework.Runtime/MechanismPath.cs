@@ -13,6 +13,26 @@ namespace Sevo.Framework.Runtime
         private readonly float[] distances;
 
         public float Length => distances[distances.Length - 1];
+        internal bool IsConnectedRail { get; private set; }
+
+        /// <summary>Builds a fixed-facing rail from ordered slider-local junctions with straight or right-angle joins.</summary>
+        /// <remarks>The caller resolves the stock pieces and supplies their centerline junctions in travel order.</remarks>
+        public static MechanismPath FromConnectedRail(IEnumerable<Vector3> junctions)
+        {
+            var path = new MechanismPath(junctions);
+            var points = path.vertices;
+            for (int index = 2; index < points.Length; index++)
+            {
+                var previous = Vector3.Normalize(points[index - 1] - points[index - 2]);
+                var next = Vector3.Normalize(points[index] - points[index - 1]);
+                float alignment = Vector3.Dot(previous, next);
+                const float tolerance = 0.0001f;
+                if (Math.Abs(alignment) > tolerance && alignment < 1f - tolerance)
+                    throw new ArgumentException("Rail joins must continue straight or turn 90 degrees.", nameof(junctions));
+            }
+            path.IsConnectedRail = true;
+            return path;
+        }
 
         public MechanismPath(IEnumerable<Vector3> offsets)
         {
@@ -46,6 +66,16 @@ namespace Sevo.Framework.Runtime
                 float fraction = (distance - distances[next - 1]) / (distances[next] - distances[next - 1]);
                 offset = Vector3.Lerp(vertices[next - 1], vertices[next], fraction);
             }
+            return true;
+        }
+
+        internal bool TryGetRailDisplacement(float nativeDistance, float negativeExtension, out Vector3 displacement)
+        {
+            displacement = default;
+            if (!TryGetOffset(negativeExtension, out var home)
+                || !TryGetOffset(nativeDistance + negativeExtension, out var point))
+                return false;
+            displacement = point - home;
             return true;
         }
 

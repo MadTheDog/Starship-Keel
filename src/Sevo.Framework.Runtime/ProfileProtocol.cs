@@ -177,6 +177,44 @@ namespace Sevo.Framework.Runtime
         internal void WriteGalaxyCatalogPin(GalaxyCatalogProfilePin pin)
             => AtomicWrite("galaxy-catalog-pin.json", pin.Serialize(ProfileId));
 
+        internal FileStream AcquireWaypointStorage()
+        {
+            ValidateMarker();
+            return new FileStream(Child("persistent-waypoints.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+
+        internal PersistentWaypointState ReadWaypoints()
+        {
+            ValidateMarker();
+            var path = Child("persistent-waypoints.json");
+            if (!File.Exists(path)) return new PersistentWaypointState(ProfileId);
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (input.Length > PersistentWaypointState.MaximumBytes) throw new InvalidOperationException("Oversized persistent waypoint file.");
+            using var reader = new BinaryReader(input);
+            return PersistentWaypointState.Read(reader.ReadBytes((int)input.Length), ProfileId);
+        }
+
+        internal void WriteWaypoints(PersistentWaypointState state)
+            => AtomicWrite("persistent-waypoints.json", state.Serialize());
+
+        internal FileStream AcquireAnchorStorage()
+        {
+            ValidateMarker();
+            return new FileStream(Child("terrain-anchors.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+
+        internal TerrainAnchorState ReadAnchorState()
+        {
+            ValidateMarker();
+            var path = Child("terrain-anchors.bin");
+            return File.Exists(path)
+                ? TerrainAnchorState.Read(WreckClaimFiles.Read(path, TerrainAnchorState.MaximumBytes), ProfileId)
+                : new TerrainAnchorState(ProfileId);
+        }
+
+        internal void WriteAnchorState(TerrainAnchorState state)
+            => AtomicWrite("terrain-anchors.bin", state.Serialize());
+
         internal FileStream AcquireGalaxyCatalogSession()
         {
             ValidateMarker();

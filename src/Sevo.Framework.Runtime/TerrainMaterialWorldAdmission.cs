@@ -68,6 +68,9 @@ namespace Sevo.Framework.Runtime
 
         private static bool Check(bool remoteLobby)
         {
+            if (profile != null && WreckClaimService.HasStockRetirementState(profile)
+                && (remoteLobby || !WreckClaimService.IsStockRetirementProtected))
+                return Reject("This profile has retired stock wrecks and requires the managed solo wreck protection hook.");
             var reason = TerrainMaterialRegistration.GetWorldAdmissionFailure(profile, remoteLobby);
             return reason == null || Reject(reason);
         }

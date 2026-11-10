@@ -34,6 +34,8 @@ namespace Sevo.Framework.Runtime
         private static VoxelRaycast? wet;
 
         public static bool IsAvailable => solid != null;
+        internal static bool IsSafePhase => GameloopManager.IsMainThread && !GameloopManager.IsNativeContainerAccessUnsafe
+            && FunctionalCommandState.IsSolo && !PlayerState.InLoadingScreen && !PlayerState.IsQuittingToDesktopOrTitle;
 
         internal static void Enable()
         {
@@ -78,8 +80,7 @@ namespace Sevo.Framework.Runtime
             hit = default;
             normalized = default;
             var query = includeWater ? wet : solid;
-            if (query == null || !GameloopManager.IsMainThread || GameloopManager.IsNativeContainerAccessUnsafe
-                || !FunctionalCommandState.IsSolo || PlayerState.InLoadingScreen || PlayerState.IsQuittingToDesktopOrTitle)
+            if (query == null || !IsSafePhase)
                 return WorldSurfaceQueryResult.Unavailable;
 
             float magnitude = direction.magnitude;

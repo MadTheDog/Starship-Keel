@@ -25,7 +25,7 @@ namespace Sevo.Framework.Runtime
     }
 
     /// <summary>Transfers eligible, caller-provided transient NPC wrecks to the local solo player.</summary>
-    public static class WreckClaimService
+    public static partial class WreckClaimService
     {
         private const string PendingDirectory = "keel-wreck-claim.pending";
         private static ProfileSession? profile;
@@ -41,43 +41,65 @@ namespace Sevo.Framework.Runtime
         /// <summary>Starts a claim on a defeated, pilotless transient NPC created by the caller with local loader authority.</summary>
         /// <remarks>The caller must own its spawn lifecycle and prevent independent respawn. A true result means Keel has durably accepted the claim.</remarks>
         public static bool TryClaimTransientWreck(ParentEntity wreck, out WreckClaimOperation? operation)
+            => TryClaim(wreck, null, out operation);
+
+        private static bool TryClaim(ParentEntity wreck, WorldTransform? recoveryPose, out WreckClaimOperation? operation)
         {
             operation = null;
-            if (busy || !TryGetWorld(out var world) || !Eligible(wreck, world)) return false;
+            if (busy || !TryGetWorld(out var world)) return false;
+            bool stock = recoveryPose.HasValue;
+            if (!stock && !Eligible(wreck, world)) return false;
             busy = true;
             string? stage = null;
+            string? marker = null;
             try
             {
+                if (stock && !EligibleStock(wreck, world)) return false;
                 if (Directory.Exists(world.Pending) || File.Exists(world.Pending)) return false;
                 string id = wreck.SGUID;
                 var files = new NativeFiles(world, id);
-                if (files.Count(ReadIndex(world)) != 0 || files.HasNativePayload
+                if (files.Count(ReadIndex(world)) != 0 || (stock ? files.HasLegacyPayload : files.HasNativePayload)
                     || EntitiesLocationMapping.Current.Mapping.TryGetValue(id, out var mapped) && !mapped.Equals(world.Star))
                     return false;
-                var transform = new WorldTransform(wreck.TransformData);
+                var transform = recoveryPose ?? new WorldTransform(wreck.TransformData);
                 if (!ClearForLoad(transform.systemPosition, world.Star, wreck)) return false;
+                var stockSource = stock ? CaptureStockSource(world, wreck, files) : null;
 
                 stage = world.Child(".keel-wreck-stage-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(stage);
                 var body = Path.Combine(stage, WreckClaimJournal.Body);
                 var metadata = Path.Combine(stage, WreckClaimJournal.Metadata);
                 wreck.SaveToDiskAtPath(body, isBlueprintExport: false);
+                if (stock)
+                {
+                    ValidatePayload(body, id, worldWreck: true);
+                    var replacement = ParentEntity.GetMetaData(body);
+                    replacement.isWorldWreck = false;
+                    Common.XMLSerializer.Serialize(replacement, metadata);
+                }
                 ValidatePayload(body, id);
                 var bodyBytes = FlushSnapshot(body, WreckClaimJournal.MaxBody);
                 var metadataBytes = FlushSnapshot(metadata, WreckClaimJournal.MaxMetadata);
                 var p = transform.systemPosition;
                 var q = transform.rotation;
                 var journal = new WreckClaimJournal(profile!.ProfileId, world.Character, world.WorldSeed, world.Star.SaveString(), id,
-                    (p.x, p.y, p.z), (q.x, q.y, q.z, q.w), WreckClaimFiles.Digest(bodyBytes), WreckClaimFiles.Digest(metadataBytes));
+                    (p.x, p.y, p.z), (q.x, q.y, q.z, q.w), WreckClaimFiles.Digest(bodyBytes), WreckClaimFiles.Digest(metadataBytes), stockSource);
                 journal.Publish(Path.Combine(stage, WreckClaimJournal.Manifest));
+                if (stockSource != null)
+                {
+                    if (!EligibleStock(wreck, world)) return false;
+                    marker = MarkerName(world, stockSource);
+                    WreckClaimFiles.Publish(Path.Combine(stage, marker), WreckClaimStockSource.MarkerBytes(id));
+                    RequireStockRetirementOnFutureLoads(world);
+                }
 
                 // Publishing the directory is the acceptance boundary. The stock source still exists until then.
                 Directory.Move(stage, world.Pending);
                 stage = null;
-                var claim = new Claim(world, journal) { Source = wreck };
+                var claim = new Claim(world, journal);
                 active = claim;
                 operation = claim.Operation;
-                BlockEntityManager.instance.RemoveAndDestroy(wreck, removeFromLocationMapping: true);
+                RetireSource(claim, wreck);
                 return true;
             }
             catch (Exception exception)
@@ -88,7 +110,7 @@ namespace Sevo.Framework.Runtime
             }
             finally
             {
-                try { if (stage != null) CleanOwnedDirectory(stage); }
+                try { if (stage != null) CleanOwnedDirectory(stage, marker); }
                 finally { busy = false; }
             }
         }
@@ -140,12 +162,23 @@ namespace Sevo.Framework.Runtime
         private static void Advance(ClaimWorld world, Claim claim)
         {
             var id = claim.Journal.Identity;
+            var stock = claim.Journal.StockSource;
+            if (stock != null)
+            {
+                if (stockProfile == null) throw new IOException("Stock wreck retirement hooks are unavailable.");
+                PublishRetirement(world, claim.Journal);
+            }
             var matches = LiveMatches(id);
             if (matches.Length > 1) throw new IOException("More than one live grid has the wreck identity.");
             var live = matches.SingleOrDefault();
             bool npcRemains = NPCManager.NpcEntities.Any(npc => npc != null && SameId(npc.SGUID, id));
             if ((live != null && ReferenceEquals(live, claim.Source)) || (npcRemains && live == null)) return;
             if (live != null && !live.IsInitialized) return;
+            if (stock != null && live != null && IsObservedSource(live, world, stock))
+            {
+                RetireSource(claim, live);
+                return;
+            }
             if (npcRemains || live != null && (!ReplacementMatches(live, world)
                 || (!live.saveInWorld && !ReferenceEquals(live, claim.Replacement))))
                 throw new IOException("The live identity belongs to an unexpected or respawned source.");
@@ -172,6 +205,7 @@ namespace Sevo.Framework.Runtime
             var metadata = world.PendingFile(WreckClaimJournal.Metadata);
             var bytes = claim.Journal.ReadPayload(body, metadata);
             ValidatePayload(body, id);
+            stock?.RetireOldPayload(files.Body, files.Metadata, bytes);
             if (live == null)
             {
                 if (claim.Replacement != null) return;
@@ -216,7 +250,7 @@ namespace Sevo.Framework.Runtime
             claim.Operation.ClaimedGrid = live;
             claim.Operation.State = WreckClaimState.Claimed;
             active = null;
-            CleanOwnedDirectory(finished);
+            CleanOwnedDirectory(finished, claim.Journal.StockSource is { } stock ? MarkerName(world, stock) : null);
         }
 
         private static void Stop(ClaimWorld world, Exception exception)
@@ -304,7 +338,7 @@ namespace Sevo.Framework.Runtime
             return index;
         }
 
-        private static void ValidatePayload(string path, string id)
+        private static void ValidatePayload(string path, string id, bool worldWreck = false)
         {
             using var file = File.OpenRead(path);
             if (file.Length <= 0 || file.Length > WreckClaimJournal.MaxBody) throw new IOException("Wreck body is oversized or empty.");
@@ -314,7 +348,7 @@ namespace Sevo.Framework.Runtime
             var meta = ParentEntity.GetMetaData(path);
             var body = BrickEntity_mp.GetSaveFromFile(file, isNewInstance: false);
             if (body == null || body.SGUID != id || !body.isDestroyed || body.assembly != null
-                || meta.type != EntityMetaType.spaceship || meta.isWorldWreck || meta.includesDockedEntities
+                || meta.type != EntityMetaType.spaceship || meta.isWorldWreck != worldWreck || meta.includesDockedEntities
                 || meta.dockedEntityCount != 0 || string.IsNullOrWhiteSpace(meta.name))
                 throw new IOException("Native wreck snapshot did not retain the expected identity and defeat state.");
         }
@@ -331,13 +365,14 @@ namespace Sevo.Framework.Runtime
             file.Flush(flushToDisk: true);
         }
 
-        private static void CleanOwnedDirectory(string path)
+        private static void CleanOwnedDirectory(string path, string? marker = null)
         {
             try
             {
                 if (!Directory.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return;
                 foreach (var name in new[] { WreckClaimJournal.Body, WreckClaimJournal.Metadata, WreckClaimJournal.Manifest })
                     File.Delete(Path.Combine(path, name));
+                if (marker != null) File.Delete(Path.Combine(path, marker));
                 Directory.Delete(path);
             }
             catch (IOException) { }

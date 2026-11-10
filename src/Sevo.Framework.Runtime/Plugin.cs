@@ -12,7 +12,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.2.1")]
+    [BepInPlugin(Id,"Starship Keel","0.2.3")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -100,6 +100,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult gridRecovery;
                 CapabilityResult wreckClaim;
                 CapabilityResult terrainEdits;
+                CapabilityResult asteroidTerrainEdits;
                 CapabilityResult seatedPoseTargets;
                 CapabilityResult dismountPoses;
                 CapabilityResult blockAssemblies;
@@ -111,6 +112,8 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult unpilotedSublightControl;
                 CapabilityResult cameraView;
                 CapabilityResult mechanismPaths;
+                CapabilityResult connectedRails;
+                CapabilityResult stockRailTools;
                 CapabilityResult gridAttachments;
                 CapabilityResult gridDestruction;
                 CapabilityResult navigationMarkers;
@@ -119,9 +122,26 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult vehicleControl;
                 CapabilityResult waypointFlight;
                 CapabilityResult bodyEnvironment;
+                CapabilityResult atmosphereSampling;
+                CapabilityResult atmospherePositionSampling;
+                CapabilityResult persistentWaypoints;
+                CapabilityResult persistentWaypointMap;
+                CapabilityResult terrainAnchors;
+                CapabilityResult terrainAnchorAttachments;
+                CapabilityResult stockWreckSourceInputs;
+                CapabilityResult gridPointMotion;
                 CapabilityResult terrainTextureOverrides;
                 CapabilityResult terrainMaterialRegistration;
                 CapabilityResult celestialLayout;
+                CapabilityResult stationBuyOffers;
+                CapabilityResult stationStock;
+                CapabilityResult orbitalPoints;
+                CapabilityResult modFactions;
+                CapabilityResult stationMissions;
+                CapabilityResult stationServices;
+                CapabilityResult stationTraffic;
+                CapabilityResult surfaceSites;
+                CapabilityResult generatedPoiLoot;
                 bool celestialLayoutCorrectPoiOrdinal;
                 CapabilityResult galaxyCatalogPreview;
                 CapabilityResult galaxyCatalogPublication;
@@ -177,6 +197,7 @@ namespace Sevo.Framework.Runtime
                     gridRecovery = ContractAudit.EvaluateGridRecovery(metadata.MainModule);
                     wreckClaim = ContractAudit.EvaluateWreckClaim(metadata.MainModule);
                     terrainEdits = ContractAudit.EvaluateTerrainEdits(metadata.MainModule);
+                    asteroidTerrainEdits = ContractAudit.EvaluateAsteroidTerrainEdits(metadata.MainModule);
                     seatedPoseTargets = ContractAudit.EvaluateSeatedPoseTargets(metadata.MainModule);
                     dismountPoses = ContractAudit.EvaluateDismountPoses(metadata.MainModule);
                     blockAssemblies = ContractAudit.EvaluateBlockAssemblies(metadata.MainModule);
@@ -188,6 +209,8 @@ namespace Sevo.Framework.Runtime
                     unpilotedSublightControl = ContractAudit.EvaluateUnpilotedSublightControl(metadata.MainModule);
                     cameraView = ContractAudit.EvaluateCameraView(metadata.MainModule);
                     mechanismPaths = ContractAudit.EvaluateMechanismPaths(metadata.MainModule);
+                    connectedRails = ContractAudit.EvaluateConnectedRails(metadata.MainModule);
+                    stockRailTools = ContractAudit.EvaluateStockRailTools(metadata.MainModule);
                     gridAttachments = ContractAudit.EvaluateGridAttachments(metadata.MainModule);
                     gridDestruction = ContractAudit.EvaluateGridDestruction(metadata.MainModule);
                     navigationMarkers = ContractAudit.EvaluateNavigationMarkers(metadata.MainModule);
@@ -196,9 +219,26 @@ namespace Sevo.Framework.Runtime
                     vehicleControl = ContractAudit.EvaluateVehicleControlProvider(metadata.MainModule);
                     waypointFlight = ContractAudit.EvaluateWaypointFlight(metadata.MainModule);
                     bodyEnvironment = ContractAudit.EvaluateBodyEnvironment(metadata.MainModule);
+                    atmosphereSampling = ContractAudit.EvaluateAtmosphereSampling(metadata.MainModule);
+                    atmospherePositionSampling = ContractAudit.EvaluateAtmospherePositionSampling(metadata.MainModule);
+                    persistentWaypoints = ContractAudit.EvaluatePersistentWaypoints(metadata.MainModule);
+                    persistentWaypointMap = ContractAudit.EvaluatePersistentWaypointMap(metadata.MainModule);
+                    terrainAnchors = ContractAudit.EvaluateTerrainAnchors(metadata.MainModule);
+                    terrainAnchorAttachments = ContractAudit.EvaluateTerrainAnchorAttachments(metadata.MainModule);
+                    stockWreckSourceInputs = ContractAudit.EvaluateStockWreckSources(metadata.MainModule);
+                    gridPointMotion = ContractAudit.EvaluateGridPointMotion(metadata.MainModule);
                     terrainTextureOverrides = ContractAudit.EvaluateTerrainTextureOverrides(metadata.MainModule);
                     terrainMaterialRegistration = ContractAudit.EvaluateTerrainMaterialRegistration(metadata.MainModule);
                     celestialLayout = ContractAudit.EvaluateCelestialLayout(metadata.MainModule, out celestialLayoutCorrectPoiOrdinal);
+                    stationBuyOffers = ContractAudit.EvaluateStationBuyOffers(metadata.MainModule);
+                    stationStock = ContractAudit.EvaluateStationStock(metadata.MainModule);
+                    orbitalPoints = ContractAudit.EvaluateOrbitalPoints(metadata.MainModule);
+                    modFactions = ContractAudit.EvaluateModFactions(metadata.MainModule);
+                    stationMissions = ContractAudit.EvaluateStationMissions(metadata.MainModule);
+                    stationServices = ContractAudit.EvaluateStationServices(metadata.MainModule);
+                    stationTraffic = ContractAudit.EvaluateStationTraffic(metadata.MainModule);
+                    surfaceSites = ContractAudit.EvaluateSurfaceSites(metadata.MainModule);
+                    generatedPoiLoot = ContractAudit.EvaluateGeneratedPoiLoot(metadata.MainModule);
                     galaxyCatalogPreview = ContractAudit.EvaluateGalaxyCatalogPreview(metadata.MainModule);
                     galaxyCatalogPublication = ContractAudit.EvaluateGalaxyCatalogPublication(metadata.MainModule);
                     terrainPlacement = ContractAudit.EvaluateTerrainPlacement(metadata.MainModule);
@@ -351,7 +391,8 @@ namespace Sevo.Framework.Runtime
                         terrainPlacement = new CapabilityResult(terrainPlacement.Name, false, admissionFailure);
                         planetTerrainGeneration = new CapabilityResult(planetTerrainGeneration.Name, false, admissionFailure);
                         asteroidTerrainGeneration = new CapabilityResult(asteroidTerrainGeneration.Name, false, admissionFailure);
-                        if (TerrainMaterialRegistration.HasPersistentTerrainMaterialState(profile))
+                        if (TerrainMaterialRegistration.HasPersistentTerrainMaterialState(profile)
+                            || WreckClaimService.HasStockRetirementState(profile))
                             Fail("Managed profile needs an unavailable terrain material world-entry guard", new InvalidOperationException(admissionFailure));
                     }
                 }
@@ -359,6 +400,22 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(bodyEnvironment, patches =>
                         BodyEnvironmentProvider.Install(patches, message => Logger.LogWarning(message)),
                         BodyEnvironmentProvider.Disable));
+                atmosphereSampling = InstallContentHook(atmosphereSampling, "EnableAtmosphereSampling", "ATMOSPHERE_SAMPLING",
+                    () =>
+                    {
+                        AtmosphereSampling.Enable(message => Logger.LogWarning(message));
+                        AtmosphereSampling.IsSystemPositionSamplingAvailable = atmospherePositionSampling.Available;
+                        return atmosphereSampling;
+                    }, AtmosphereSampling.Disable);
+                if (atmospherePositionSampling.Available && !atmosphereSampling.Available)
+                    atmospherePositionSampling = new CapabilityResult(atmospherePositionSampling.Name, false, "Requires atmosphere sampling.");
+                var atmosphereObservers = InstallContentHook(new CapabilityResult("atmosphereObservers",
+                    atmospherePositionSampling.Available, atmospherePositionSampling.Reason),
+                    "EnableAtmosphereObservers", "ATMOSPHERE_OBSERVERS", () =>
+                    {
+                        AtmosphereObservers.Enable(message => Logger.LogWarning(message));
+                        return new CapabilityResult("atmosphereObservers", true, "Scoped atmosphere observation is enabled.");
+                    }, AtmosphereObservers.Disable);
                 terrainTextureOverrides = InstallContentHook(terrainTextureOverrides, "EnableTerrainTextureOverrides", "TERRAIN_TEXTURE_OVERRIDES",
                     () => InstallContentHookPatches(terrainTextureOverrides, patches =>
                         TerrainTextureOverride.Install(patches, message => Logger.LogWarning(message)),
@@ -375,6 +432,30 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(terrainMiningDrops, patches =>
                         TerrainMiningDropRegistration.Install(patches, message => Logger.LogWarning(message)),
                         TerrainMiningDropRegistration.Disable));
+                stationBuyOffers = InstallContentHook(stationBuyOffers, "EnableStationBuyOffers", "STATION_BUY_OFFERS",
+                    () => InstallContentHookPatches(stationBuyOffers, patches =>
+                        StationBuyOffers.Install(patches, message => Logger.LogWarning(message)), StationBuyOffers.Disable));
+                stationStock = InstallContentHook(stationStock, "EnableStationStock", "STATION_STOCK",
+                    () => InstallContentHookPatches(stationStock, patches =>
+                        StationStock.Install(patches, message => Logger.LogWarning(message)), StationStock.Disable));
+                orbitalPoints = InstallContentHook(orbitalPoints, "EnableOrbitalPoints", "ORBITAL_POINTS",
+                    () => InstallContentHookPatches(orbitalPoints, patches =>
+                        OrbitalPoints.Install(patches, message => Logger.LogWarning(message)), OrbitalPoints.Disable));
+                modFactions = InstallContentHook(modFactions, "EnableModFactions", "MOD_FACTIONS",
+                    () => InstallContentHookPatches(modFactions, patches =>
+                        ModFactions.Install(patches, message => Logger.LogWarning(message)), ModFactions.Disable));
+                stationMissions = InstallContentHook(stationMissions, "EnableStationMissions", "STATION_MISSIONS",
+                    () => InstallContentHookPatches(stationMissions, patches =>
+                        StationMissions.Install(patches, message => Logger.LogWarning(message)), StationMissions.Disable));
+                stationServices = InstallContentHook(stationServices, "EnableStationServices", "STATION_SERVICES",
+                    () => InstallContentHookPatches(stationServices, patches =>
+                        StationServices.Install(patches, message => Logger.LogWarning(message)), StationServices.Disable));
+                stationTraffic = InstallContentHook(stationTraffic, "EnableStationTraffic", "STATION_TRAFFIC",
+                    () => InstallContentHookPatches(stationTraffic, patches =>
+                        StationTraffic.Install(patches, message => Logger.LogWarning(message)), StationTraffic.Disable));
+                generatedPoiLoot = InstallContentHook(generatedPoiLoot, "EnableGeneratedPoiLoot", "GENERATED_POI_LOOT",
+                    () => InstallContentHookPatches(generatedPoiLoot, patches =>
+                        GeneratedPoiLoot.Install(patches, message => Logger.LogWarning(message)), GeneratedPoiLoot.Disable));
                 celestialLayout = InstallContentHook(celestialLayout, "EnableCelestialLayout", "CELESTIAL_LAYOUT",
                     () => InstallContentHookPatches(celestialLayout, patches =>
                         CelestialLayoutProvider.Install(patches, message => Logger.LogWarning(message), celestialLayoutCorrectPoiOrdinal),
@@ -454,6 +535,29 @@ namespace Sevo.Framework.Runtime
                         WorldSurfaceQuery.Enable();
                         return worldSurfaceQuery;
                     }, WorldSurfaceQuery.Disable);
+                if (terrainAnchors.Available && !worldSurfaceQuery.Available)
+                    terrainAnchors = new CapabilityResult(terrainAnchors.Name, false, "Requires the world surface query hook.");
+                terrainAnchors = InstallContentHook(terrainAnchors, "EnableTerrainAnchors", "TERRAIN_ANCHORS",
+                    () =>
+                    {
+                        TerrainAnchor.Enable();
+                        return terrainAnchors;
+                    }, TerrainAnchor.Disable);
+                if (surfaceSites.Available && !terrainAnchors.Available)
+                    surfaceSites = new CapabilityResult(surfaceSites.Name, false, "Requires the terrain anchor contact hook.");
+                surfaceSites = InstallContentHook(surfaceSites, "EnableSurfaceSites", "SURFACE_SITES",
+                    () =>
+                    {
+                        SurfaceSites.Enable(message => Logger.LogWarning(message));
+                        return surfaceSites;
+                    }, SurfaceSites.Disable);
+                if (terrainAnchorAttachments.Available && !terrainAnchors.Available)
+                    terrainAnchorAttachments = new CapabilityResult(terrainAnchorAttachments.Name, false, "Requires the terrain anchor contact hook.");
+                terrainAnchorAttachments = InstallContentHook(terrainAnchorAttachments, "EnableTerrainAnchorAttachments", "TERRAIN_ANCHOR_ATTACHMENTS", () =>
+                {
+                    TerrainAnchorAttachments.Enable(profile!);
+                    return terrainAnchorAttachments;
+                }, TerrainAnchorAttachments.Disable);
                 if (terrainEdits.Available && !worldSurfaceQuery.Available)
                     terrainEdits = new CapabilityResult(terrainEdits.Name, false, "Requires the world surface query hook.");
                 terrainEdits = InstallContentHook(terrainEdits, "EnableTerrainEdits", "TERRAIN_EDITS",
@@ -462,6 +566,14 @@ namespace Sevo.Framework.Runtime
                         TerrainEditService.Enable(message => Logger.LogWarning(message));
                         return terrainEdits;
                     }, TerrainEditService.Disable);
+                if (asteroidTerrainEdits.Available && !terrainEdits.Available)
+                    asteroidTerrainEdits = new CapabilityResult(asteroidTerrainEdits.Name, false, "Requires the resident terrain edit hook.");
+                asteroidTerrainEdits = InstallContentHook(asteroidTerrainEdits, "EnableAsteroidTerrainEdits", "ASTEROID_TERRAIN_EDITS",
+                    () =>
+                    {
+                        TerrainEditService.EnableAsteroids();
+                        return asteroidTerrainEdits;
+                    }, TerrainEditService.DisableAsteroids);
                 seatedPoseTargets = InstallContentHook(seatedPoseTargets, "EnableSeatedPoseTargets", "SEATED_POSE_TARGETS",
                     () => InstallContentHookPatches(seatedPoseTargets,
                         patches => SeatedPoseTargetProvider.Install(patches, message => Logger.LogWarning(message)),
@@ -501,6 +613,13 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(gridPhysics,
                         patches => GridPhysicsStep.Install(patches, message => Logger.LogWarning(message)),
                         GridPhysicsStep.Disable));
+                if (gridPointMotion.Available && !gridPhysics.Available)
+                    gridPointMotion = new CapabilityResult(gridPointMotion.Name, false, "Requires the grid physics hook.");
+                gridPointMotion = InstallContentHook(gridPointMotion, "EnableGridPointMotion", "GRID_POINT_MOTION", () =>
+                {
+                    GridForceService.IsPointMotionAvailable = true;
+                    return gridPointMotion;
+                }, () => GridForceService.IsPointMotionAvailable = false);
                 if (sublightControl.Available && !gridPhysics.Available)
                     sublightControl = new CapabilityResult(sublightControl.Name, false, "Requires the grid physics hook.");
                 sublightControl = InstallContentHook(sublightControl, "EnableSublightControl", "SUBLIGHT_CONTROL", () =>
@@ -520,6 +639,20 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(mechanismPaths,
                         patches => MechanismPathProvider.Install(patches, message => Logger.LogWarning(message)),
                         MechanismPathProvider.Disable));
+                if (connectedRails.Available && !mechanismPaths.Available)
+                    connectedRails = new CapabilityResult(connectedRails.Name, false, "Requires the fixed-facing mechanism path hook.");
+                connectedRails = InstallContentHook(connectedRails, "EnableConnectedRails", "CONNECTED_RAILS", () =>
+                {
+                    MechanismPathProvider.EnableConnectedRails();
+                    return connectedRails;
+                }, MechanismPathProvider.DisableConnectedRails);
+                if (stockRailTools.Available && !connectedRails.Available)
+                    stockRailTools = new CapabilityResult(stockRailTools.Name, false, "Requires the connected rail hook.");
+                stockRailTools = InstallContentHook(stockRailTools, "EnableStockRailTools", "STOCK_RAIL_TOOLS", () =>
+                {
+                    MechanismStockRail.Enable();
+                    return stockRailTools;
+                }, MechanismStockRail.Disable);
                 gridAttachments = InstallContentHook(gridAttachments, "EnableGridAttachments", "GRID_ATTACHMENTS", () =>
                 {
                     GridAttachmentService.Enable(message => Logger.LogWarning(message));
@@ -533,6 +666,20 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(navigationMarkers,
                         patches => NavigationMarkerProvider.Install(patches, message => Logger.LogWarning(message)),
                         NavigationMarkerProvider.Disable));
+                if (persistentWaypoints.Available && !navigationMarkers.Available)
+                    persistentWaypoints = new CapabilityResult(persistentWaypoints.Name, false, "Requires the audited navigation marker hook.");
+                persistentWaypoints = InstallContentHook(persistentWaypoints, "EnablePersistentWaypoints", "PERSISTENT_WAYPOINTS",
+                    () =>
+                    {
+                        PersistentWaypoints.Enable(profile!);
+                        return persistentWaypoints;
+                    }, PersistentWaypoints.Disable);
+                if (persistentWaypointMap.Available && !persistentWaypoints.Available)
+                    persistentWaypointMap = new CapabilityResult(persistentWaypointMap.Name, false, "Requires persistent waypoint storage.");
+                persistentWaypointMap = InstallContentHook(persistentWaypointMap, "EnablePersistentWaypointMap", "PERSISTENT_WAYPOINT_MAP",
+                    () => InstallContentHookPatches(persistentWaypointMap,
+                        patches => PersistentWaypointMap.Install(patches, message => Logger.LogWarning(message)),
+                        PersistentWaypointMap.Disable));
                 navigationTargets = InstallContentHook(navigationTargets, "EnableNavigationTargets", "NAVIGATION_TARGETS",
                     () =>
                     {
@@ -562,15 +709,21 @@ namespace Sevo.Framework.Runtime
                     WreckClaimService.Enable(profile!, message => Logger.LogWarning(message));
                     return wreckClaim;
                 }, WreckClaimService.Disable);
+                var stockWreckClaim = InstallStockWreckProtection(stockWreckSourceInputs, wreckClaim);
+                var stationCapabilities = new[] { stationBuyOffers, stationStock, orbitalPoints, modFactions,
+                    stationMissions, stationServices, stationTraffic, generatedPoiLoot, surfaceSites };
+                if (!experimental && stationCapabilities.Any(capability => capability.Available))
+                    status.Mode = "experimental-content-hooks";
                 if (!experimental && (wreckClaim.Available || cameraView.Available || vehicleControl.Available || waypointFlight.Available || logicOutputs.Available || navigationMarkers.Available || navigationTargets.Available || gridAttachments.Available || gridDestruction.Available || mechanismPaths.Available || gridPhysics.Available || transferLinks.Available || blockAssemblies.Available || shipyardAssemblyEligibility.Available || terrainEdits.Available || seatedPoseTargets.Available || dismountPoses.Available || gridRecovery.Available || worldSurfaceQuery.Available || contextActions.Available || inventoryViews.Available || items.Available || machineRecipes.Available || gathering.Available || recipes.Available || fluids.Available
                     || oreGeneration.Available || oreScanner.Available || oreDiscovery.Available || terrainMaterials.Available
-                    || bodyEnvironment.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || galaxyCatalogPublication.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
+                    || bodyEnvironment.Available || atmosphereSampling.Available || terrainTextureOverrides.Available || terrainMaterialRegistration.Available || celestialLayout.Available || galaxyCatalogPublication.Available || terrainPlacement.Available || planetTerrainGeneration.Available || asteroidTerrainGeneration.Available))
                     status.Mode = "experimental-content-hooks";
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
                     codexCapability, items, itemCodex, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainDepositScanner, terrainDepositNativeHighlights, terrainMaterials,
-                    bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, wreckClaim, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    bodyEnvironment, atmosphereSampling, atmospherePositionSampling, atmosphereObservers, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, terrainAnchors, terrainAnchorAttachments, gridRecovery, wreckClaim, stockWreckClaim, terrainEdits, asteroidTerrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, gridPointMotion, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, connectedRails, stockRailTools, gridAttachments, gridDestruction, navigationMarkers, persistentWaypoints, persistentWaypointMap, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
+                    .Concat(stationCapabilities)
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
                 Logger.LogInfo(gateCapability.Name+": "+gateCapability.Reason);
@@ -625,6 +778,40 @@ namespace Sevo.Framework.Runtime
                 capabilities = capabilities.ToDictionary(pair => pair.Key, pair => pair.Key == "lifecycle"
                     ? new CapabilityResult("lifecycle", false, reason) : pair.Value);
                 Logger.LogWarning(reason);
+            }
+        }
+
+        private CapabilityResult InstallStockWreckProtection(CapabilityResult sources, CapabilityResult transientClaims)
+        {
+            const string capability = "stockWreckClaim";
+            if (profile == null) return new CapabilityResult(capability, false, "Requires a managed solo profile.");
+            var session = profile;
+            bool requested = Config.Bind("Experimental", "EnableStockWreckClaim", false,
+                "Enable new stock wreck claims. Protection for existing claims stays active.").Value
+                || Environment.GetEnvironmentVariable("SEVO_KEEL_EXPERIMENTAL_STOCK_WRECK_CLAIM") == "1";
+            bool allowNewClaims = requested && transientClaims.Available;
+            if (!allowNewClaims && !WreckClaimService.HasStockRetirementState(session))
+                return new CapabilityResult(capability, false, requested
+                    ? "Requires the transient wreck claim hook." : "Disabled by default.");
+            if (!sources.Available)
+            {
+                Logger.LogWarning(capability + ": " + sources.Reason);
+                return new CapabilityResult(capability, false, sources.Reason);
+            }
+            try
+            {
+                InstallContentHookPatches(sources,
+                    patches => WreckClaimService.EnableStockSources(patches, session, allowNewClaims, message => Logger.LogWarning(message)),
+                    WreckClaimService.DisableStockSources);
+                return new CapabilityResult(capability, allowNewClaims, allowNewClaims
+                    ? "Stock terrain wreck claims and durable source retirement enabled."
+                    : "Existing stock wreck retirement protected. New claims require both wreck claim settings.");
+            }
+            catch (Exception exception)
+            {
+                WreckClaimService.DisableStockSources();
+                Logger.LogWarning(capability + ": stock source protection failed: " + exception.Message);
+                return new CapabilityResult(capability, false, "Stock source protection failed: " + exception.Message);
             }
         }
 
@@ -1027,6 +1214,7 @@ namespace Sevo.Framework.Runtime
         {
             if(KeelFunctionalCommand.Enabled) KeelFunctionalCommand.StopOutsideSolo();
             WreckClaimService.Tick();
+            AtmosphereObservers.Tick();
             // Wait until the resource loader returns to the player loop. JIT-compiling native interaction
             // methods can initialize UI and crafting types that require fully allocated game resources.
             if(awaitingAttachmentInteraction && pendingAttachmentGame!=null && pendingAttachmentCapability!=null)

@@ -19,6 +19,12 @@ The [manual probe](../../docs/KEEL-MECHANISM-PATHS.md) binds stock sliders tagge
 
 The fixture samples the live native child transform over successive rendered frames and checks both orthogonal legs, return travel, fixed rotation and the original travel plane. Use the manual probe for stock comparison and disk reconstruction.
 
+## Built-in clearance preview
+
+Set the sample's `Probe.UseBuiltInSweep` configuration to `true` and enable mechanism paths, connected rails and stock rail tools in the managed solo profile. Check that Keel reports `stockRailTools` available. The same tagged slider follows the authored right angle using Keel's collider query. The stock game supplies straight extensions. This sample supplies the turn as slider-local geometry.
+
+Use the empty fixture for a traversal check. For a manual obstruction check, put a solid block at the outside of the second leg where only the payload can reach it. Drive the slider until it stops, remove the obstacle, and drive it again. The built-in check may stop early when the swept bounds overlap geometry that the actual payload would clear. The native penetration fixture below exercises the older provider and expects native rollback after contact. Leave `UseBuiltInSweep` disabled for that fixture.
+
 ## Optional obstruction fixture
 
 Set `SEVO_KEEL_MECHANISM_PATH_FIXTURE_OBSTRUCTION=1` along with the variables above. Use a fresh disposable character whose name ends in a dash and the first eight characters of `SEVO_PLATFORM_SESSION`. The lab's solo server must run in `dontListen` mode.
