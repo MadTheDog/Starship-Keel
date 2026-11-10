@@ -153,6 +153,41 @@ namespace Sevo.Framework.Runtime
             }
         }
 
+        public static CapabilityResult EvaluateAsteroidDepositCoordinates(ModuleDefinition module)
+        {
+            const string capability = "asteroidDepositCoordinates";
+            try
+            {
+                var dispatch = RequireTerrainProviderMethod(module, PlacementCompute, "Dispatch", false, TerrainVoid,
+                    "System.Int32", PlacementCompute + "/JobNodeData");
+                var immediate = RequireTerrainProviderMethod(module, PlacementCompute, "DispatchImmediate", false,
+                    TerrainVoid, PlacementNode, TerrainAsteroidInstance, PlacementVoxel + "[]");
+                foreach (var method in new[] { dispatch, immediate })
+                {
+                    var instructions = method.Body.Instructions;
+                    var position = instructions.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Ldstr
+                        && Equals(instruction.Operand, "_NodePosition"));
+                    if (position == null || !instructions.Skip(instructions.IndexOf(position) + 1).Take(4)
+                        .Any(instruction => TerrainProviderField(instruction, Code.Ldfld, PlacementNode, "position"))
+                        || !instructions.Any(instruction => TerrainPlacementCall(instruction, PlacementNode, "get_VoxelSize"))
+                        || !instructions.Any(instruction => TerrainPlacementCall(instruction,
+                            TerrainAsteroidInstance, "get_AsteroidDensityGenerationData")))
+                        throw new InvalidOperationException("Asteroid dispatch no longer uses the audited node origin and scale.");
+                }
+                if (!Field(module, TerrainAsteroidInstance, "seed", "System.UInt64", false)
+                    || !dispatch.Body.Instructions.Any(instruction => TerrainProviderField(instruction,
+                        Code.Ldsflda, "World.Terrain.AsteroidResources", "datas"))
+                    || !dispatch.Body.Instructions.Any(instruction => TerrainProviderField(instruction,
+                        Code.Ldfld, PlacementNode, "asteroidId")))
+                    throw new InvalidOperationException("The native asteroid instance binding changed.");
+                return new CapabilityResult(capability, true, "Async and baked asteroid node origins, scales and instance binding validated.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
         public static CapabilityResult EvaluateTerrainAuthoredSurfacePlacement(ModuleDefinition module)
         {
             const string capability = "terrainAuthoredSurfacePlacement";

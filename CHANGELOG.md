@@ -1,5 +1,18 @@
 # Starship Keel changelog
 
+## 0.2.1
+
+- Add experimental deterministic custom deposits on fresh planet and asteroid terrain using registered material identities.
+- Add experimental stock-backed native ore and ingot registration with contextual material identity and save validation.
+
+- Add high-contrast scanner badges for admitted resident deposits and preserve native sample highlights for ore-backed materials on a stock pulse.
+- List registered item identities under native Codex Bricks → Crafting, with stock Creative hotbar interaction.
+
+- Honor native terrain mining scale ranges for replacement drops.
+- Support optional compact material symbols in native ore and ingot slots.
+
+- Add independent stock terrain art selection and diffuse tint for registered material identities.
+
 ## 0.2.0
 
 - Added opt-in rocky-body environment declarations and bounded planet and ring-asteroid generation parameters.

@@ -30,6 +30,7 @@ public sealed class Plugin : BaseUnityPlugin
     private bool startSolo;
     private bool drainStalledFrame;
     private bool bootSurvivalOnly;
+    private bool bootOnly;
     private bool roundTrip;
     private int harnessFrames;
     private ParentEntity? grid;
@@ -58,7 +59,8 @@ public sealed class Plugin : BaseUnityPlugin
             bootSurvivalOnly = startSolo && Environment.GetEnvironmentVariable("SEVO_KEEL_LAB_BOOT_SURVIVAL") == "1";
             drainStalledFrame = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_DRAIN_STALLED_FRAME") == "1";
             roundTrip = Environment.GetEnvironmentVariable("SEVO_KEEL_FLUID_PROBE_ROUNDTRIP") == "1";
-            if (!bootSurvivalOnly)
+            bootOnly = bootSurvivalOnly || startSolo && Environment.GetEnvironmentVariable("SEVO_KEEL_LAB_BOOT_CREATIVE") == "1";
+            if (!bootOnly)
             {
                 FluidRegistration.Register(Owner, "coolant", 1, new FluidDefinition("Probe Coolant", 0x32aaff, 1.12f, 0f));
                 FluidRegistration.Register(Owner, "brine", 1, new FluidDefinition("Probe Brine", 0x88aa44, 1.24f, 0f));
@@ -182,7 +184,7 @@ public sealed class Plugin : BaseUnityPlugin
             NetworkServer.dontListen = true;
             creation.PlayWithNewCharacter();
         }
-        if (bootSurvivalOnly) yield break;
+        if (bootOnly) yield break;
         while (!SoloReady() || !FluidRegistration.IsAvailable || GameloopManager.jobStarted)
         {
             CheckDeadline();

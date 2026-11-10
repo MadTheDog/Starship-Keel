@@ -104,6 +104,54 @@ namespace Sevo.Framework.Runtime
             }
         }
 
+        public static CapabilityResult EvaluateContextualItems(ModuleDefinition module)
+        {
+            const string capability = "contextualItems";
+            try
+            {
+                const string element = "VoxelEngine.CraftingElement";
+                const string category = "Game.WorldItemType";
+                const string context = "contextualDataId";
+                const string integer = "System.Int32";
+                if (!Field(module, ItemDataType, context, integer, false)
+                    || !Field(module, ItemSaveType, context, integer, false)
+                    || !Field(module, element, context, integer, false)
+                    || !Field(module, PrefabDataType, "itemType", category, false)
+                    || !module.GetType(category).Fields.Any(field => field.IsLiteral && field.Name == "ore")
+                    || !module.GetType(category).Fields.Any(field => field.IsLiteral && field.Name == "ingot"))
+                    throw new InvalidOperationException("Native material identity fields changed.");
+                RequireItemMethod(module, "World.Terrain.TerrainMaterialCommon", "GetMaterialName", true,
+                    "System.String", integer, integer);
+                var create = RequireItemMethod(module, element, "get_ToItemData", false, ItemDataType);
+                var merge = RequireItemMethod(module, "Game.ItemInstanceCommon", "CanMerge", true, "System.Boolean",
+                    ItemDataType + "&", ItemDataType, "VoxelEngine.StorageContext", "System.Boolean");
+                var contextualMerge = RequireItemMethod(module, "Game.ItemInstanceCommon", "CanMergeByContextualData",
+                    true, "System.Boolean", ItemDataType, ItemDataType, "System.Boolean");
+                var comparison = contextualMerge.Body.Instructions.TakeLast(6).ToArray();
+                if (comparison.Length != 6 || comparison[0].OpCode.Code != Code.Ldarg_0
+                    || !ItemFieldAccess(comparison[1], ItemDataType, context)
+                    || comparison[2].OpCode.Code != Code.Ldarg_1
+                    || !ItemFieldAccess(comparison[3], ItemDataType, context)
+                    || comparison[4].OpCode.Code != Code.Ceq || comparison[5].OpCode.Code != Code.Ret
+                    || !merge.Body.Instructions.Any(instruction => instruction.OpCode.Code == Code.Call
+                        && instruction.Operand is MethodReference target && target.FullName == contextualMerge.FullName))
+                    throw new InvalidOperationException("Native ore stacking no longer compares both material contexts.");
+                var save = RequireItemMethod(module, ItemDataType, "get_SaveData", false, ItemSaveType);
+                var load = RequireItemMethod(module, ItemDataType, "LoadSaveData", true, ItemDataType,
+                    ItemSaveType, integer, "System.Boolean");
+                if (!ItemFieldAccess(create, element, context) || !ItemFieldAccess(create, ItemDataType, context)
+                    || !ItemFieldAccess(merge, ItemDataType, context)
+                    || !ItemFieldAccess(save, ItemSaveType, context) || !ItemFieldAccess(save, ItemDataType, context)
+                    || !ItemFieldAccess(load, ItemSaveType, context) || !ItemFieldAccess(load, ItemDataType, context))
+                    throw new InvalidOperationException("Native creation, stacking or save no longer carries material context.");
+                return new CapabilityResult(capability, true, "Native contextual item creation, stacking and save fields validated.");
+            }
+            catch (Exception exception)
+            {
+                return new CapabilityResult(capability, false, exception.Message);
+            }
+        }
+
         private static MethodDefinition RequireItemMethod(ModuleDefinition module, string type, string name,
             bool isStatic, string result, params string[] parameters)
         {

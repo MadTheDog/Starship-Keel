@@ -12,7 +12,7 @@ using Sevo.Framework.Sdk;
 
 namespace Sevo.Framework.Runtime
 {
-    [BepInPlugin(Id,"Starship Keel","0.2.0")]
+    [BepInPlugin(Id,"Starship Keel","0.2.1")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id="local.sevo.modplatform";
@@ -40,6 +40,7 @@ namespace Sevo.Framework.Runtime
         private NativeLimits? limits;
         private bool experimental;
         private bool resourceChecksPassed;
+        private bool applicationQuitting;
 
         private void Awake()
         {
@@ -76,6 +77,8 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult codexCapability;
                 CapabilityResult recipes;
                 CapabilityResult items;
+                CapabilityResult contextualItems;
+                CapabilityResult itemCodex;
                 CapabilityResult itemVisuals;
                 CapabilityResult tintedItemSurface;
                 CapabilityResult machineRecipes;
@@ -84,6 +87,8 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult oreGeneration;
                 CapabilityResult oreScanner;
                 CapabilityResult oreDiscovery;
+                CapabilityResult terrainDepositScanner;
+                CapabilityResult terrainDepositNativeHighlights;
                 CapabilityResult terrainMaterials;
                 CapabilityResult storageConnectors;
                 CapabilityResult flushStoragePlacement;
@@ -122,6 +127,7 @@ namespace Sevo.Framework.Runtime
                 CapabilityResult galaxyCatalogPublication;
                 CapabilityResult terrainPlacement;
                 CapabilityResult terrainRadialPlacement;
+                CapabilityResult asteroidDepositCoordinates;
                 CapabilityResult terrainAuthoredSurfacePlacement;
                 CapabilityResult terrainMiningDrops;
                 CapabilityResult planetTerrainGeneration;
@@ -148,6 +154,8 @@ namespace Sevo.Framework.Runtime
                     codexCapability=ContractAudit.EvaluateCodexCategories(metadata.MainModule,out codexMenus);
                     recipes = ContractAudit.EvaluateRecipes(metadata.MainModule);
                     items = ContractAudit.EvaluateItems(metadata.MainModule);
+                    contextualItems = ContractAudit.EvaluateContextualItems(metadata.MainModule);
+                    itemCodex = ContractAudit.EvaluateItemCodex(metadata.MainModule);
                     itemVisuals = ContractAudit.EvaluateItemVisuals(metadata.MainModule);
                     tintedItemSurface = ContractAudit.EvaluateTintedItemSurface(metadata.MainModule);
                     machineRecipes = ContractAudit.EvaluateMachineRecipes(metadata.MainModule);
@@ -156,6 +164,8 @@ namespace Sevo.Framework.Runtime
                     oreGeneration = ContractAudit.EvaluateOreGeneration(metadata.MainModule);
                     oreScanner = ContractAudit.EvaluateOreScanner(metadata.MainModule);
                     oreDiscovery = ContractAudit.EvaluateOreDiscovery(metadata.MainModule);
+                    terrainDepositScanner = ContractAudit.EvaluateTerrainDepositScanner(metadata.MainModule);
+                    terrainDepositNativeHighlights = ContractAudit.EvaluateTerrainDepositNativeHighlights(metadata.MainModule);
                     terrainMaterials = ContractAudit.EvaluateTerrainMaterialVisuals(metadata.MainModule);
                     storageConnectors = ContractAudit.EvaluateStorageConnectors(metadata.MainModule);
                     flushStoragePlacement = ContractAudit.EvaluateFlushStoragePlacement(metadata.MainModule);
@@ -193,6 +203,7 @@ namespace Sevo.Framework.Runtime
                     galaxyCatalogPublication = ContractAudit.EvaluateGalaxyCatalogPublication(metadata.MainModule);
                     terrainPlacement = ContractAudit.EvaluateTerrainPlacement(metadata.MainModule);
                     terrainRadialPlacement = ContractAudit.EvaluateTerrainRadialPlacement(metadata.MainModule);
+                    asteroidDepositCoordinates = ContractAudit.EvaluateAsteroidDepositCoordinates(metadata.MainModule);
                     terrainAuthoredSurfacePlacement = ContractAudit.EvaluateTerrainAuthoredSurfacePlacement(metadata.MainModule);
                     terrainMiningDrops = ContractAudit.EvaluateTerrainMiningDrops(metadata.MainModule);
                     planetTerrainGeneration = ContractAudit.EvaluatePlanetTerrainGeneration(metadata.MainModule);
@@ -227,13 +238,42 @@ namespace Sevo.Framework.Runtime
                 }
                 if(!functionalCapability.Available && attachmentCapability.Available)
                     attachmentCapability=new CapabilityResult(attachmentCapability.Name,false,"Shared functional command contracts are unavailable.");
+                if (items.Available)
+                {
+                    try { items = InstallContentHookPatches(items, ItemResources.InstallSaveGuard, () => { }); }
+                    catch (Exception exception)
+                    {
+                        items = new CapabilityResult(items.Name, false, "Tagged item load guard unavailable: " + exception.Message);
+                    }
+                }
                 items = InstallContentHook(items, "EnableItemRegistration", "ITEMS",
                     () =>
                     {
-                        ItemResources.Install(profile!, items, message => Logger.LogWarning(message));
+                        ItemResources.Install(profile!, items, contextualItems, message => Logger.LogWarning(message));
                         return items;
                     },
-                    () => ItemResources.Disable());
+                    () =>
+                    {
+                        // Native teardown owns the published item tables. Keep save tagging active through quit.
+                        if (!applicationQuitting) ItemResources.Disable();
+                    });
+                if (!items.Available)
+                    itemCodex = new CapabilityResult(itemCodex.Name, false, "Requires native item registration.");
+                if (itemCodex.Available)
+                {
+                    try
+                    {
+                        itemCodex = InstallContentHookPatches(itemCodex,
+                            patches => ItemCodexRegistration.Install(patches, message => Logger.LogWarning(message)),
+                            ItemCodexRegistration.Disable);
+                    }
+                    catch (Exception exception)
+                    {
+                        itemCodex = new CapabilityResult(itemCodex.Name, false, exception.Message);
+                    }
+                }
+                if (!itemCodex.Available && items.Available)
+                    Logger.LogWarning(itemCodex.Name + ": " + itemCodex.Reason);
                 if (itemVisuals.Available && !items.Available)
                     itemVisuals = new CapabilityResult(itemVisuals.Name, false, "Requires the item registration hook.");
                 itemVisuals = InstallContentHook(itemVisuals, "EnableItemVisuals", "ITEM_VISUALS",
@@ -267,6 +307,27 @@ namespace Sevo.Framework.Runtime
                     () => InstallContentHookPatches(oreScanner, patches =>
                         OreScannerSnapshots.Install(patches, message => Logger.LogWarning(message)),
                         () => OreScannerSnapshots.Disable()));
+                terrainDepositScanner = InstallContentHook(terrainDepositScanner, "EnableTerrainDepositScanner", "TERRAIN_DEPOSIT_SCANNER",
+                    () => InstallContentHookPatches(terrainDepositScanner, patches =>
+                        TerrainDepositScanner.Install(patches, gameObject, message => Logger.LogWarning(message)),
+                        TerrainDepositScanner.Disable));
+                if (!terrainDepositScanner.Available)
+                    terrainDepositNativeHighlights = new CapabilityResult(terrainDepositNativeHighlights.Name, false, "Requires the terrain deposit scanner.");
+                if (terrainDepositNativeHighlights.Available)
+                {
+                    try
+                    {
+                        terrainDepositNativeHighlights = InstallContentHookPatches(terrainDepositNativeHighlights,
+                            patches => TerrainDepositNativeHighlights.Install(patches, message => Logger.LogWarning(message)),
+                            TerrainDepositNativeHighlights.Disable);
+                    }
+                    catch (Exception exception)
+                    {
+                        terrainDepositNativeHighlights = new CapabilityResult(terrainDepositNativeHighlights.Name, false, exception.Message);
+                    }
+                }
+                if (terrainDepositScanner.Available)
+                    Logger.LogInfo(terrainDepositNativeHighlights.Name + ": " + terrainDepositNativeHighlights.Reason);
                 oreDiscovery = InstallContentHook(oreDiscovery, "EnableOreDiscovery", "ORE_DISCOVERY",
                     () => InstallContentHookPatches(oreDiscovery, patches =>
                         OreDiscoveryProvider.Install(patches, message => Logger.LogWarning(message)),
@@ -335,6 +396,7 @@ namespace Sevo.Framework.Runtime
                 terrainRadialPlacement = InstallContentHook(terrainRadialPlacement, "EnableTerrainRadialPlacement", "TERRAIN_RADIAL_PLACEMENT", () =>
                 {
                     TerrainPlacement.EnableRadialBands();
+                    TerrainPlacement.SetAsteroidDepositCoordinates(asteroidDepositCoordinates);
                     return terrainRadialPlacement;
                 });
                 if (terrainAuthoredSurfacePlacement.Available && !terrainPlacement.Available)
@@ -507,7 +569,7 @@ namespace Sevo.Framework.Runtime
                 Logger.LogInfo("Assembly diagnostic MVID="+status.AssemblyMvid+"; no identity admission gate. Mode="+status.Mode);
                 status.Capabilities=capabilities.Values.Concat(new[]{functionalCapability,gateCapability,attachmentCapability,
                     visualCapability,materialCapability,paintCapability,repeatCapability,defaultPaintCapability,modularCapability,
-                    codexCapability, items, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainMaterials,
+                    codexCapability, items, itemCodex, itemVisuals, tintedItemSurface, machineRecipes, gathering, recipes, fluids, oreGeneration, oreScanner, oreDiscovery, terrainDepositScanner, terrainDepositNativeHighlights, terrainMaterials,
                     bodyEnvironment, terrainTextureOverrides, terrainMaterialRegistration, celestialLayout, galaxyCatalogPreview, galaxyCatalogPublication, terrainPlacement, terrainRadialPlacement, terrainAuthoredSurfacePlacement, terrainMiningDrops, planetTerrainGeneration, asteroidTerrainGeneration, storageConnectors, flushStoragePlacement, selectablePassThrough, nativeBlockVariants, contextActions, inventoryViews, worldSurfaceQuery, gridRecovery, wreckClaim, terrainEdits, seatedPoseTargets, dismountPoses, blockAssemblies, shipyardAssemblyEligibility, machineWorkRateModifiers, transferLinks, gridPhysics, sublightControl, preparedSublightControl, unpilotedSublightControl, cameraView, mechanismPaths, gridAttachments, gridDestruction, navigationMarkers, navigationTargets, logicOutputs, vehicleControl, waypointFlight})
                     .Select(result=>new StatusCapability{Name=result.Name,Available=result.Available,Reason=result.Reason}).ToArray();
                 Logger.LogInfo(functionalCapability.Name+": "+functionalCapability.Reason);
@@ -977,6 +1039,8 @@ namespace Sevo.Framework.Runtime
                 FinishReadiness();
             }
         }
+        private void OnApplicationQuit() => applicationQuitting = true;
+
         private void OnDestroy()
         {
             if(!ReferenceEquals(instance,this)) return;

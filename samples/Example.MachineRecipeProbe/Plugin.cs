@@ -34,6 +34,7 @@ namespace Sevo.Example.MachineRecipeProbe
         private ParentEntity? sourceGrid;
         private string session = "";
         private bool armed;
+        private bool contextualOre;
         private static Plugin? observingLoad;
         private LoadedCrusher? loadedCrusher;
         private BrickInstanceData? conveyorStorage;
@@ -46,6 +47,12 @@ namespace Sevo.Example.MachineRecipeProbe
             if (!Guid.TryParseExact(session, "N", out _))
             {
                 Logger.LogWarning("KEEL_MACHINE_PROBE requires an isolated lab session.");
+                return;
+            }
+            contextualOre = Environment.GetEnvironmentVariable("SEVO_KEEL_MACHINE_PROBE_CONTEXTUAL") == "1";
+            if (contextualOre)
+            {
+                armed = true;
                 return;
             }
             ItemRegistration.Register(Owner, "dust", 1, () =>
@@ -117,7 +124,13 @@ namespace Sevo.Example.MachineRecipeProbe
                 yield return null;
             }
 
-            if (ore.id == 0 || dust.id == 0 || pellet.id == 0 || dust.id == pellet.id)
+            if (contextualOre)
+            {
+                ore = Item("example.aluminium:ore", 1);
+                dust = Item("example.aluminium:bar", 1);
+                VerifyContextualItems();
+            }
+            if (ore.id == 0 || dust.id == 0 || (!contextualOre && (pellet.id == 0 || dust.id == pellet.id)))
                 throw new InvalidOperationException("The contextual and custom recipe identities did not resolve.");
             Step($"resolved-recipes ore={ore.id}/{ore.contextualDataId} dust={dust.id} pellet={pellet.id}");
 
@@ -143,25 +156,28 @@ namespace Sevo.Example.MachineRecipeProbe
                     yield return null;
                 }
                 Place(furnaceData);
-                Place(crusherData);
+                if (!contextualOre) Place(crusherData);
                 FurnaceCommandData furnace = default;
                 CrusherCommandData crusher = default;
                 Step("awaiting-stock-command-ids");
-                while (!Safe() || !TryCommand(furnaceData, out furnace) || !TryCommand(crusherData, out crusher))
+                while (!Safe() || !TryCommand(furnaceData, out furnace) || (!contextualOre && !TryCommand(crusherData, out crusher)))
                 {
                     Deadline(timer);
                     yield return null;
                 }
                 int furnaceId = furnace.CommandId;
                 int crusherId = crusher.CommandId;
-                Require(furnaceId > 0 && crusherId > 0 && !furnace.isCrucible, "The native arc furnace and crusher did not register.");
+                Require(furnaceId > 0 && (contextualOre || crusherId > 0) && !furnace.isCrucible, "The native arc furnace and crusher did not register.");
 
                 Step($"stock-slot-validation furnace={furnaceId} crusher={crusherId}");
                 var oreData = ore.ToItemData;
-                oreData.prefabId = (int)WorldPropCommon.WorldPropId.rockSmallB;
+                if (!contextualOre) oreData.prefabId = (int)WorldPropCommon.WorldPropId.rockSmallB;
                 Require(furnace.IsItemValidInput(oreData), "The native furnace input predicate rejected the stock ore.");
-                Require(crusher.IsItemValidInput(dust.ToItemData), "The native crusher input predicate rejected registered dust.");
-                Require(!crusher.IsItemValidInput(pellet.ToItemData), "The native crusher accepted the unrelated custom pellet.");
+                if (!contextualOre)
+                {
+                    Require(crusher.IsItemValidInput(dust.ToItemData), "The native crusher input predicate rejected registered dust.");
+                    Require(!crusher.IsItemValidInput(pellet.ToItemData), "The native crusher accepted the unrelated custom pellet.");
+                }
                 var drill = new CraftingElement(WorldPropCommon.WorldPropId.drill_bit, 1f).ToItemData;
                 Require(CrusherCommandData.IsItemValidDrillBit(drill), "The stock drill bit predicate rejected the stock bit.");
 
@@ -176,12 +192,15 @@ namespace Sevo.Example.MachineRecipeProbe
                 furnace.inputItemId = oreData.id;
                 furnace.PushItself();
 
-                crusher = CrusherCommandData.datas[crusherId];
-                Require(crusher.drillBitItemId == 0, "The fixture's drill-bit slot is already occupied.");
-                drill.RegisterAndPushItself(StorageCommon.CONTEXT);
-                crusher.drillBitItemId = drill.id;
-                crusher.SpawnOrRefreshDrillBitVisual();
-                crusher.PushItself();
+                if (!contextualOre)
+                {
+                    crusher = CrusherCommandData.datas[crusherId];
+                    Require(crusher.drillBitItemId == 0, "The fixture's drill-bit slot is already occupied.");
+                    drill.RegisterAndPushItself(StorageCommon.CONTEXT);
+                    crusher.drillBitItemId = drill.id;
+                    crusher.SpawnOrRefreshDrillBitVisual();
+                    crusher.PushItself();
+                }
 
                 Step("checking-unpowered-furnace");
                 float holdUntil = Time.realtimeSinceStartup + CraftSeconds + 0.25f;
@@ -243,6 +262,17 @@ namespace Sevo.Example.MachineRecipeProbe
                     && FurnaceCommandData.datas[furnaceId].inputItemId != oreData.id,
                     "The furnace failed exact input consumption or produced a stock ingot.");
                 Logger.LogInfo($"KEEL_MACHINE_PROBE FURNACE PASS oreCarrier={oreData.prefabId} dust={dust.quantity} power={Power().powerStored:F1} session={session}");
+
+                if (contextualOre)
+                {
+                    var output = CraftingCommon.PopupCraftingElement(furnace.StorageId, dust, StorageCommon.CONTEXT);
+                    Require(output.id != 0 && output.prefabId == dust.id, "The native inventory could not remove the aluminium bar.");
+                    ItemInstanceResources.ReleaseItemId(output.id);
+                    var conveyor = ExerciseConveyor(timer, furnaceData, furnace, crusherData, crusherId);
+                    while (conveyor.MoveNext()) yield return conveyor.Current;
+                    Logger.LogInfo($"KEEL_MACHINE_PROBE CONTEXTUAL PASS session={session}");
+                    yield break;
+                }
 
                 // Move only the furnace's output into the live crusher input slot via stock inventory removal.
                 var transfer = CraftingCommon.PopupCraftingElement(furnace.StorageId, dust, StorageCommon.CONTEXT);
@@ -320,10 +350,13 @@ namespace Sevo.Example.MachineRecipeProbe
                 yield return null;
             }
 
-            var wrong = ore;
-            // Arc furnaces treat coal ore as fuel rather than an eligible smelting input.
-            wrong.contextualDataId = (int)MaterialGradientType.coal;
-            Require(FurnaceCommandData.IsItemValidFuel(wrong.ToItemData), "Stock coal ore no longer matches the control input.");
+            var wrong = contextualOre ? Item("example.quartz:chunk", 1) : ore;
+            if (!contextualOre)
+            {
+                // Arc furnaces treat coal ore as fuel rather than an eligible smelting input.
+                wrong.contextualDataId = (int)MaterialGradientType.coal;
+                Require(FurnaceCommandData.IsItemValidFuel(wrong.ToItemData), "Stock coal ore no longer matches the control input.");
+            }
             Insert(cargo.StorageId, wrong.ToItemData);
             Insert(cargo.StorageId, ore.ToItemData);
             ConfigureFurnace(furnace.CommandId, push: false);
@@ -348,6 +381,7 @@ namespace Sevo.Example.MachineRecipeProbe
             conveyorStorage = container;
             Logger.LogInfo($"KEEL_MACHINE_PROBE FURNACE_CONVEYOR PASS source={cargo.StorageId} furnace={furnace.StorageId} wrongContext={wrong.contextualDataId} pushedDust={dust.quantity} session={session}");
 
+            if (contextualOre) yield break;
             Step("connecting-crusher-conveyor");
             var crusherContainer = PlaceConveyorStorage(crusherData);
             var crusher = CrusherCommandData.datas[crusherId];
@@ -585,6 +619,38 @@ namespace Sevo.Example.MachineRecipeProbe
             data.scale = 0;
             data.gridPosition = new Vector3i(x, y, z);
             return data;
+        }
+
+        private void VerifyContextualItems()
+        {
+            var input = ore.ToItemData;
+            var output = dust.ToItemData;
+            var second = Item("example.quartz:chunk", 1).ToItemData;
+            var iron = TabSchematics.Schematic_IronIngots.element0.ToItemData;
+            var context = StorageCommon.CONTEXT;
+            Require(input.Name() == "Aluminium Chunk" && output.Name() == "Aluminium Bar"
+                && input.CanBePickedUp(context) && output.CanBePickedUp(context)
+                && ItemInstanceCommon.CanMerge(input, input, context, mergeWithEmpty: false)
+                && !ItemInstanceCommon.CanMerge(input, second, context, mergeWithEmpty: false)
+                && !ItemInstanceCommon.CanMerge(input, iron, context, mergeWithEmpty: false),
+                "Native item naming, pickup eligibility or stack isolation failed.");
+            foreach (var item in new[] { input, output })
+            {
+                var saved = MessagePackSerializer.Deserialize<ItemSaveData>(MessagePackSerializer.Serialize(item.SaveData));
+                Require(saved.data is { Length: > 0 }, "The saved item has no Keel identity.");
+                var loaded = ItemInstanceData.LoadSaveData(saved, 0);
+                try
+                {
+                    Require(loaded.id != 0 && loaded.itemType == item.itemType && loaded.prefabId == item.prefabId
+                        && loaded.contextualDataId == item.contextualDataId,
+                        "The native item codec lost the contextual identity.");
+                }
+                finally
+                {
+                    if (loaded.id != 0) ItemInstanceResources.ReleaseItemId(loaded.id);
+                }
+            }
+            Logger.LogInfo($"KEEL_MACHINE_PROBE CONTEXTUAL_ITEMS PASS session={session}");
         }
 
         private static CraftingElement Item(string key, float quantity) =>

@@ -15,3 +15,7 @@ The log reports `KEEL_MACHINE_PROBE POWER PASS`, `FURNACE PASS`, `CHAIN PASS`, a
 Set SEVO_KEEL_MACHINE_PROBE_WORK_RATE=1 in the dedicated connector lab, with the machine recipe, block assembly and machine work-rate hooks enabled. The probe runs its ordinary ore-to-pellet chain, then feeds matching ore to two powered Arc Furnaces on the same stock grid. It binds a physical hull module to one furnace and checks that its native progress advances at twice the control rate.
 
 The probe deletes the module through the stock builder. It requires the live assembly to become incomplete, both furnaces to retain their earned progress, and their subsequent progress increments to match. Each furnace must consume one input and commit the exact custom output without a stock ingot. Look for WORK_RATE BOOST, WORK_RATE REVERT, and WORK_RATE PASS in the KEEL_MACHINE_PROBE log.
+
+## Contextual ore and ingot check
+
+Load Example.Aluminium and Example.Quartz with the Keel 0.2.1 item, terrain material and machine recipe hooks. Set SEVO_KEEL_MACHINE_PROBE_CONTEXTUAL=1 alongside the probe flag in the disposable lab. This mode checks the two distinct native material contexts, item naming and pickup eligibility, native stack separation, the native MessagePack item codec, the powered Arc Furnace, and a conveyor pull and push with a second ore in the source. It does not place a Crusher.

@@ -23,6 +23,7 @@ namespace Sevo.Example.TerrainRegisteredTextures
         private const string Normal = "WORLD_NORMAL_TEX";
         private const string Sand = "TEX_SAND_A";
         private const string Iron = "RAW_IRON_A";
+        private const string Silver = "RAW_SILVER_A";
         private readonly List<Texture2D> owned = new List<Texture2D>();
         private Texture2DArray? stockDiffuse;
         private Texture2DArray? stockNormal;
@@ -53,6 +54,10 @@ namespace Sevo.Example.TerrainRegisteredTextures
                     owned.Add(invalid);
                     return new TerrainTextureLayers(diffuse: invalid);
                 });
+                TerrainMaterialRegistration.RegisterStockVisual(Id, "warm-ore", 1, Iron, Iron,
+                    new Color32(241, 226, 205, 255), brightness: 1.4f);
+                TerrainMaterialRegistration.RegisterStockVisual("example.independent-visual", "cool-ore", 1, Iron, Silver,
+                    new Color32(168, 222, 246, 255));
                 enabledProbe = true;
             }
             catch (Exception exception) { Logger.LogError("KEEL_REGISTERED_TERRAIN_TEXTURE_PROBE FAIL " + exception); }
@@ -82,7 +87,7 @@ namespace Sevo.Example.TerrainRegisteredTextures
             {
                 Verify(rows, diffuse, Shader.GetGlobalTexture(Normal) as Texture2DArray);
                 verified = diffuse;
-                Logger.LogInfo("KEEL_REGISTERED_TERRAIN_TEXTURE_PROBE PASS customLayer=1 independentStockOverride=1 invalidFallback=1 gpuRow=true");
+                Logger.LogInfo("KEEL_REGISTERED_TERRAIN_TEXTURE_PROBE PASS customLayer=1 independentStockOverride=1 invalidFallback=1 stockTints=2 gpuRow=true");
             }
             catch (Exception exception)
             {
@@ -99,7 +104,7 @@ namespace Sevo.Example.TerrainRegisteredTextures
                 || !TerrainMaterialRegistration.TryGetId(Id + ":fallback", out byte fallback))
                 throw new InvalidOperationException("The registered materials or atlas bindings were not published.");
             int firstLayer = Math.Max(stockDiffuse.depth, stockNormal.depth);
-            if (diffuse.depth != firstLayer + 2 || normal.depth != firstLayer + 2)
+            if (diffuse.depth != firstLayer + 4 || normal.depth != firstLayer + 4)
                 throw new InvalidOperationException("The stock and registered materials did not share one paired append.");
             var repo = Resources.FindObjectsOfTypeAll<WorldTerrainResources>().Single(asset =>
                 asset.terrainTextures.Count < rows.Length && asset.terrainTextures.Any(material => material.ShaderName == Iron));
@@ -127,6 +132,41 @@ namespace Sevo.Example.TerrainRegisteredTextures
                 .GetField("computeBuffer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(handler)!;
             var color = diffuse.GetPixels(customSand, diffuse.mipmapCount - 1)[0];
             AssertGpuRow(buffer, custom, customSand, color);
+            VerifyStockTint(Id + ":warm-ore", iron);
+            int silver = repo.terrainTextures.FindIndex(material => material.ShaderName == Silver);
+            VerifyStockTint("example.independent-visual:cool-ore", silver);
+
+            void VerifyStockTint(string key, int visualRow)
+            {
+                if (visualRow < 0 || !TerrainMaterialRegistration.TryGetId(key, out byte id))
+                    throw new InvalidOperationException("Tinted stock terrain row is missing: " + key);
+                var actual = rows[id];
+                int layer = actual.textureId;
+                var expected = rows[iron];
+                expected.textureId = layer;
+                expected.fadeValue = actual.fadeValue;
+                if (layer < firstLayer || !actual.Equals(expected) || !actual.IsOre || !actual.IsRawOre)
+                    throw new InvalidOperationException("Visual tint changed terrain gameplay data: " + key);
+                int visualLayer = rows[visualRow].textureId;
+                bool changed = false;
+                for (int mip = 0; mip < diffuse.mipmapCount; mip++)
+                {
+                    var stock = stockDiffuse.GetPixelData<byte>(mip, visualLayer);
+                    var tint = diffuse.GetPixelData<byte>(mip, layer);
+                    AssertMip(stock, diffuse.GetPixelData<byte>(mip, visualLayer));
+                    AssertMip(stockNormal.GetPixelData<byte>(mip, visualLayer), normal.GetPixelData<byte>(mip, layer));
+                    for (int i = 0; i < stock.Length; i++)
+                    {
+                        if (stock[i] == tint[i]) continue;
+                        if ((i & 15) is < 8 or > 11)
+                            throw new InvalidOperationException("A BC3 alpha or color index changed.");
+                        changed = true;
+                    }
+                }
+                if (!changed) throw new InvalidOperationException("Stock tint did not change diffuse endpoints.");
+                AssertGpuRow(buffer, id, layer, diffuse.GetPixels(layer, diffuse.mipmapCount - 1)[0]);
+                Logger.LogInfo($"KEEL_STOCK_VISUAL key={key} id={id} layer={layer} source={visualLayer} gradient={actual.gradientId}");
+            }
         }
 
         private static void AssertGpuRow(ComputeBuffer buffer, byte id, int layer, Color fade)

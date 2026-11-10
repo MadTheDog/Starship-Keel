@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
+using Manager;
 using Sevo.Framework.Sdk;
 using Unity.Collections;
 using UnityEngine;
@@ -27,6 +28,7 @@ namespace Sevo.Framework.Runtime
         private static readonly object Completed = new object();
         private static Action<string>? report;
         private static bool radialBands;
+        private static CapabilityResult? asteroidDepositCoordinates;
         private static bool authoredSurfaceBands;
         private static int mainThread;
         private static TerrainPlacementRule[]? declarations;
@@ -70,6 +72,7 @@ namespace Sevo.Framework.Runtime
         }
 
         internal static void EnableRadialBands() => radialBands = true;
+        internal static void SetAsteroidDepositCoordinates(CapabilityResult result) => asteroidDepositCoordinates = result;
         internal static void EnableAuthoredSurfaceBands() => authoredSurfaceBands = true;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -119,7 +122,8 @@ namespace Sevo.Framework.Runtime
         private static void RecordSuccessfulReadback(DensityComputeJob __instance, AsyncGPUReadbackRequest __0)
         {
             SuccessfulReadbacks.Remove(__instance);
-            if (ActiveOnMainThread() && Seal().Length > 0 && !__0.hasError)
+            if (ActiveOnMainThread() && !__0.hasError && (Seal().Length > 0
+                || (OreDepositRegistration.IsAvailable && OreDepositRegistration.Seal().Length > 0)))
                 SuccessfulReadbacks.Add(__instance, Completed);
         }
 
@@ -153,20 +157,22 @@ namespace Sevo.Framework.Runtime
                     if (values.IsCreated && values.Length == VoxelCount)
                     {
                         var scope = node.planetGenerationId != 0 ? TerrainPlacementScope.Planets : TerrainPlacementScope.Asteroids;
-                        bool needsBody = Seal().Any(rule => (rule.Scope & scope) != 0
+                        bool needsBody = OreDepositRegistration.IsAvailable && OreDepositRegistration.Seal().Length != 0 || Seal().Any(rule => (rule.Scope & scope) != 0
                             && (rule.BodySeed.HasValue || (radialBands && rule.Band.HasValue)));
                         float radius = 0f;
                         var seed = needsBody ? FindSeed(node, out radius) : null;
                         var plan = GetPlan(scope, seed);
-                        if (plan?.HasChanges == true)
+                        var deposits = ResolveDeposits(scope, seed);
+                        if (plan?.HasChanges == true || deposits.Length != 0)
                         {
-                            bool mapSpatial = (plan.HasRadialBands || plan.HasAuthoredSurfaceBands)
+                            bool mapSpatial = plan != null && (plan.HasRadialBands || plan.HasAuthoredSurfaceBands)
                                 && seed.HasValue && CanMapRadial(node, radius);
-                            ulong systemSeed = plan.HasAuthoredSurfaceBands ? GetCurrentSystemSeed() : 0;
+                            ulong systemSeed = plan?.HasAuthoredSurfaceBands == true ? GetCurrentSystemSeed() : 0;
                             for (int index = 0; index < values.Length; index++)
                             {
                                 var original = values[index];
-                                var updated = mapSpatial
+                                var updated = TryDeposit(original, deposits, node, radius, index, out var deposit) ? deposit
+                                    : plan == null ? original : mapSpatial
                                     ? RemapSpatial(original, plan, node, systemSeed, seed.GetValueOrDefault(), radius, index)
                                     : Remap(original, plan);
                                 if (updated.texId0 != original.texId0 || updated.texId1 != original.texId1)
@@ -183,20 +189,98 @@ namespace Sevo.Framework.Runtime
             OctreeNodeResources.SetVoxelData(ref id, values);
         }
 
-        private static void AfterSynchronousReadback(AsteroidData __1, VoxelNodeData[] __2)
+        private static void AfterSynchronousReadback(OctreeNodeData __0, AsteroidData __1, VoxelNodeData[] __2)
         {
             if (!ActiveOnMainThread() || __2.Length != VoxelCount) return;
             try
             {
                 var plan = GetPlan(TerrainPlacementScope.Asteroids, __1.seed);
-                if (plan?.HasChanges != true) return;
+                var deposits = ResolveDeposits(TerrainPlacementScope.Asteroids, __1.seed);
+                if (plan?.HasChanges != true && deposits.Length == 0) return;
                 for (int index = 0; index < __2.Length; index++)
-                    __2[index] = Remap(__2[index], plan);
+                {
+                    var original = __2[index];
+                    __2[index] = TryDeposit(original, deposits, __0, 0, index, out var deposit)
+                        ? deposit : plan == null ? original : Remap(original, plan);
+                }
             }
             catch (Exception exception)
             {
                 WarnOnce("Baked asteroid placement failed: " + exception.Message);
             }
+        }
+
+        private static (OreDepositField Field, byte Host, byte Material, double? Depth)[] ResolveDeposits(
+            TerrainPlacementScope scope, ulong? seed)
+        {
+            var empty = Array.Empty<(OreDepositField, byte, byte, double?)>();
+            if (!OreDepositRegistration.IsAvailable) return empty;
+            var declarations = OreDepositRegistration.Seal();
+            if (!declarations.Any(rule => (rule.Scope & scope) != 0)) return empty;
+            if (scope == TerrainPlacementScope.Asteroids && asteroidDepositCoordinates is not { Available: true })
+            {
+                WarnOnce("Asteroid ore deposits skipped: " + (asteroidDepositCoordinates?.Reason ?? "coordinate audit unavailable."));
+                return empty;
+            }
+            if (!seed.HasValue || SaveManager.playerSave is not { seed: > 0 } save)
+            {
+                WarnOnce("Ore deposits skipped because a native world or body seed is unavailable.");
+                return empty;
+            }
+            if (!TerrainMaterialRegistration.TryGetStockCount(out int stockCount))
+            {
+                WarnOnce("Ore deposits skipped because the registered terrain material table is unavailable.");
+                return empty;
+            }
+            var live = WorldTerrainResources.TerrainMaterialDatas;
+            if (stockNames == null || !live.Equals(materialPublication) || !ownsRegisteredPublication)
+            {
+                stockNames = ReadStockNames(stockCount);
+                materialPublication = live;
+                inspectedMaterialPublication = true;
+                ownsRegisteredPublication = true;
+                Plans.Clear();
+            }
+            var active = new List<(OreDepositField, byte, byte, double?)>();
+            foreach (var rule in declarations)
+            {
+                if ((rule.Scope & scope) == 0) continue;
+                if (stockNames == null || !stockNames.TryGetValue(rule.Host, out byte host)
+                    || !TerrainMaterialRegistration.TryGetId(rule.Material, out byte material))
+                {
+                    WarnOnce($"Ore deposit '{rule.Key}' skipped because its host or registered material is unavailable.");
+                    continue;
+                }
+                active.Add((new OreDepositField(rule.Key, save.seed, seed.Value, rule.Spacing, rule.Radius, rule.Chance),
+                    host, material, rule.MaximumNominalDepth));
+            }
+            return active.ToArray();
+        }
+
+        private static bool TryDeposit(VoxelNodeData value,
+            (OreDepositField Field, byte Host, byte Material, double? Depth)[] deposits,
+            in OctreeNodeData node, float radius, int index, out VoxelNodeData result)
+        {
+            result = value;
+            if (deposits.Length == 0 || value.density >= 0 || value.texId0 != value.texId1) return false;
+            const int width = OctreeNodeData.DENSITY_WIDTH;
+            var centre = node.GetPosition(index % width, index / width % width, index / (width * width));
+            double x = (double)node.position.x + centre.x;
+            double y = (double)node.position.y + centre.y;
+            double z = (double)node.position.z + centre.z;
+            foreach (var deposit in deposits)
+            {
+                if (value.texId0 != deposit.Host) continue;
+                if (deposit.Depth is double limit)
+                {
+                    double depth = radius - Math.Sqrt(x * x + y * y + z * z);
+                    if (depth < 0 || depth >= limit) continue;
+                }
+                if (!deposit.Field.Contains(x, y, z)) continue;
+                result.texId0 = result.texId1 = deposit.Material;
+                return true;
+            }
+            return false;
         }
 
         private static VoxelNodeData Remap(VoxelNodeData value, TerrainPlacementPlan plan)

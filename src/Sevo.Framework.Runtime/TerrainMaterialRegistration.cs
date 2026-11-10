@@ -26,6 +26,8 @@ namespace Sevo.Framework.Runtime
         private static Publication? active;
         private static string? failure;
 
+        internal static bool IsEnabled => enabled;
+
         public static bool IsAvailable => enabled && failure == null && active is Publication publication && OwnsTable(publication.Rows);
 
         /// <summary>Declares a terrain material identity and its case-sensitive stock backing material during Awake.</summary>
@@ -38,8 +40,20 @@ namespace Sevo.Framework.Runtime
             => RegisterCore(ownerId, localName, revision, stockBackingMaterial,
                 createLayers ?? throw new ArgumentNullException(nameof(createLayers)));
 
+        /// <summary>Uses another stock surface's art and recolors its diffuse layer without changing the gameplay backing.</summary>
+        public static void RegisterStockVisual(string ownerId, string localName, int revision, string stockBackingMaterial,
+            string stockVisualMaterial, Color32 tint, float brightness = 1f)
+        {
+            if (string.IsNullOrWhiteSpace(stockVisualMaterial))
+                throw new ArgumentException("A stock visual shader name is required.", nameof(stockVisualMaterial));
+            if (!float.IsFinite(brightness) || brightness <= 0 || brightness > 4)
+                throw new ArgumentOutOfRangeException(nameof(brightness));
+            RegisterCore(ownerId, localName, revision, stockBackingMaterial, null,
+                new TerrainTextureOverride.StockTint(stockVisualMaterial, tint, brightness));
+        }
+
         private static void RegisterCore(string ownerId, string localName, int revision, string stockBackingMaterial,
-            Func<TerrainTextureLayers>? createLayers)
+            Func<TerrainTextureLayers>? createLayers, TerrainTextureOverride.StockTint? stockTint = null)
         {
             string key = ownerId + ":" + localName;
             ContentAllocator.ValidateKey(key);
@@ -50,7 +64,7 @@ namespace Sevo.Framework.Runtime
             {
                 if (sealedDeclarations) throw new InvalidOperationException("Terrain material declarations are closed for this process.");
                 if (Declarations.ContainsKey(key)) throw new InvalidOperationException("Duplicate terrain material declaration: " + key);
-                Declarations.Add(key, new Declaration(revision, stockBackingMaterial, createLayers));
+                Declarations.Add(key, new Declaration(revision, stockBackingMaterial, createLayers, stockTint));
             }
         }
 
@@ -96,9 +110,9 @@ namespace Sevo.Framework.Runtime
             lock (Gate)
             {
                 sealedDeclarations = true;
-                return Declarations.Where(pair => pair.Value.CreateLayers != null).OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                    .Select(pair => new TerrainTextureOverride.LayerRequest(pair.Key, pair.Value.BackingMaterial,
-                        pair.Value.CreateLayers!, isRegisteredMaterial: true)).ToArray();
+                return Declarations.Where(pair => pair.Value.CreateLayers != null || pair.Value.StockTint.HasValue).OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new TerrainTextureOverride.LayerRequest(pair.Key, pair.Value.StockTint?.Material ?? pair.Value.BackingMaterial,
+                        pair.Value.CreateLayers, isRegisteredMaterial: true, stockTint: pair.Value.StockTint)).ToArray();
             }
         }
 
@@ -281,16 +295,19 @@ namespace Sevo.Framework.Runtime
 
         private sealed class Declaration
         {
-            internal Declaration(int revision, string backingMaterial, Func<TerrainTextureLayers>? createLayers)
+            internal Declaration(int revision, string backingMaterial, Func<TerrainTextureLayers>? createLayers,
+                TerrainTextureOverride.StockTint? stockTint)
             {
                 Revision = revision;
                 BackingMaterial = backingMaterial;
                 CreateLayers = createLayers;
+                StockTint = stockTint;
             }
 
             internal int Revision { get; }
             internal string BackingMaterial { get; }
             internal Func<TerrainTextureLayers>? CreateLayers { get; }
+            internal TerrainTextureOverride.StockTint? StockTint { get; }
         }
 
         private sealed class Publication

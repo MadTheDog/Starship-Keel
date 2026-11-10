@@ -18,6 +18,10 @@ Keep `item-registry.json` with the profile and saves. Keel preserves allocated I
 
 Use the item probe for runtime evidence. Basic item registration uses the stock crafting-part category and a verified existing mesh and collider. Multiplayer synchronization and save migration need separate contracts.
 
+## Codex listing
+
+Live registered items automatically appear in the native Bricks → Crafting family. See [Native items in the Codex](KEEL-ITEM-CODEX.md) for the category and compatibility rules.
+
 ## Optional item representation
 
 The item representation preview accepts `ItemVisualDefinition` as the fourth argument to `ItemDefinition`. Enable both `EnableItemRegistration` and `EnableItemVisuals` in the `[Experimental]` section of the Keel configuration. Managed test sessions can also set `SEVO_KEEL_EXPERIMENTAL_ITEMS=1` and `SEVO_KEEL_EXPERIMENTAL_ITEM_VISUALS=1`.

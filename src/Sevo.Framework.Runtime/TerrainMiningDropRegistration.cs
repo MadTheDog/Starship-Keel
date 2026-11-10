@@ -112,7 +112,7 @@ namespace Sevo.Framework.Runtime
                 && FunctionalCommandState.IsSolo && !PlayerState.InLoadingScreen && !PlayerState.IsQuittingToDesktopOrTitle
                 && TerrainMaterialRegistration.TryGetKey(voxel.MainTexId, out var materialKey)
                 && (rules ?? Seal()).TryGetValue(materialKey!, out var rule)
-                && TrySpawnReplacement(rule, stock, position, out var replacement))
+                && TrySpawnReplacement(rule, stock, position, scale, prefabs, out var replacement))
             {
                 // The stock method reads this same local to apply its normal impulse.
                 stock = replacement;
@@ -121,9 +121,13 @@ namespace Sevo.Framework.Runtime
             return ItemInstanceData.SpawnRandomItem(ref stock, position, scale, prefabs);
         }
 
-        private static bool TrySpawnReplacement(Rule rule, ItemInstanceData stock, Vector3l position, out ItemInstanceData replacement)
+        private static bool TrySpawnReplacement(Rule rule, ItemInstanceData stock, Vector3l position,
+            float2 scale, WorldPropCommon.WorldPropId[] prefabs, out ItemInstanceData replacement)
         {
             replacement = default;
+            if (!float.IsFinite(scale.x) || !float.IsFinite(scale.y) || scale.x <= 0 || scale.y < scale.x
+                || prefabs == null || prefabs.Length == 0)
+                return false;
             try
             {
                 if (!ItemRegistration.TryCreateItemData(rule.ItemKey, rule.Quantity, out replacement) || !replacement.CanRenderInWorld())
@@ -135,11 +139,20 @@ namespace Sevo.Framework.Runtime
                 replacement.seed = stock.seed;
                 replacement.disposeTime = stock.disposeTime;
                 var hash = new SkeetoHash(stock.seed);
+                // Consume the stock prefab-selection draw while retaining the registered prefab.
+                _ = hash.GetIntRange(0, prefabs.Length - 1);
+                var sampledScale = hash.GetFloatRange(scale.x, scale.y);
+                if (!float.IsFinite(sampledScale) || sampledScale <= 0)
+                    return false;
+
+                replacement.scale = sampledScale;
                 replacement.Register();
                 replacement.AllocateAllComponents(new SkyTransformData
                 {
                     systemPosition = position,
-                    rotation = hash.GetRotation()
+                    rotation = hash.GetRotation(),
+                    scale = sampledScale,
+                    localScale = sampledScale
                 });
                 if (replacement.id == 0 || replacement.rigidbodyId == 0 || replacement.worldColliderId == 0 || replacement.transformId == 0)
                     throw new InvalidOperationException("The replacement item did not finish native component allocation.");

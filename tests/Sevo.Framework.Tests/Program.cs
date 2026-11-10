@@ -15,6 +15,15 @@ if(args.Length>0 && args[0]=="audit") {
  using var current=AssemblyDefinition.ReadAssembly(args.Length>1 ? args[1] : ".refs/game/Assembly-CSharp.dll");
  foreach(var capability in Sevo.Framework.Runtime.ContractAudit.Evaluate(current.MainModule).Values)
   Console.WriteLine($"{capability.Name}: {capability.Available}; {capability.Reason}");
+ foreach (var capability in new[] {
+  Sevo.Framework.Runtime.ContractAudit.EvaluateItems(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateContextualItems(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateItemCodex(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainDepositScanner(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainPlacement(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateAsteroidDepositCoordinates(current.MainModule),
+  Sevo.Framework.Runtime.ContractAudit.EvaluateTerrainRadialPlacement(current.MainModule)
+ }) Console.WriteLine($"{capability.Name}: {capability.Available}; {capability.Reason}");
  var functional=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalCommands(current.MainModule);
  Console.WriteLine($"{functional.Name}: {functional.Available}; {functional.Reason}");
  var eventGate=Sevo.Framework.Runtime.ContractAudit.EvaluateFunctionalEventGate(current.MainModule);
@@ -29,6 +38,7 @@ if(args.Length>0 && args[0]=="audit") {
 int checks=0;
 checks += CelestialLayoutTests.Run();
 checks += OreDiscoveryTests.Run();
+checks += OreDepositTests.Run();
 checks += BodyEnvironmentTests.Run();
 checks += TerrainGenerationProviderTests.Run();
 checks += GalaxyCatalogTests.Run();
@@ -256,6 +266,7 @@ checks += AttachmentMaterialAuditTests.Run();
 checks += MaterialBindingTests.Run();
 checks += AttachmentDefaultPaintAuditTests.Run();
 checks += CodexCategoryAuditTests.Run();
+checks += ItemCodexAuditTests.Run();
 checks += FluidHookTests.Run();
 checks += OreGenerationTests.Run();
 using (var recipeGame = AssemblyDefinition.ReadAssembly(".refs/game/Assembly-CSharp.dll")) RecipeAuditTests.Run(recipeGame.MainModule);

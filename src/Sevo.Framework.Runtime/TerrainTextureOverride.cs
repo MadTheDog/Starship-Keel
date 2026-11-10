@@ -217,13 +217,15 @@ namespace Sevo.Framework.Runtime
                     int stockLayer = rows[row].textureId;
                     if ((uint)stockLayer >= (uint)diffuse.depth || (uint)stockLayer >= (uint)normal.depth)
                         throw new InvalidOperationException("The original texture layer is missing.");
-                    var textures = declaration.CreateLayers();
-                    if (textures == null || (textures.Diffuse == null && textures.Normal == null))
+                    var textures = declaration.CreateLayers?.Invoke();
+                    if (declaration.StockVisualTint.HasValue && diffuse.graphicsFormat is not (GraphicsFormat.RGBA_DXT5_UNorm or GraphicsFormat.RGBA_DXT5_SRGB))
+                        throw new InvalidOperationException("Tinted stock terrain diffuse requires a readable BC3 atlas.");
+                    if (!declaration.StockVisualTint.HasValue && (textures == null || (textures.Diffuse == null && textures.Normal == null)))
                         throw new InvalidOperationException("The factory did not return a live terrain texture.");
-                    ValidateTexture(textures.Diffuse, diffuse);
-                    ValidateTexture(textures.Normal, normal);
+                    ValidateTexture(textures?.Diffuse, diffuse);
+                    ValidateTexture(textures?.Normal, normal);
                     accepted.Add(new Layer(row, declaration.MaterialName, stockLayer, textures,
-                        declaration.IsRegisteredMaterial ? declaration.Key : null));
+                        declaration.IsRegisteredMaterial ? declaration.Key : null, declaration.StockVisualTint));
                 }
                 catch (Exception exception)
                 {
@@ -238,8 +240,8 @@ namespace Sevo.Framework.Runtime
             Texture2DArray? newNormal = null;
             try
             {
-                newDiffuse = Expand(diffuse, firstLayer, accepted, layer => layer.Textures.Diffuse);
-                newNormal = Expand(normal, firstLayer, accepted, layer => layer.Textures.Normal);
+                newDiffuse = Expand(diffuse, firstLayer, accepted, layer => layer.Textures?.Diffuse, recolorDiffuse: true);
+                newNormal = Expand(normal, firstLayer, accepted, layer => layer.Textures?.Normal);
                 for (int i = 0; i < accepted.Count; i++)
                 {
                     accepted[i].TextureLayer = firstLayer + i;
@@ -291,7 +293,7 @@ namespace Sevo.Framework.Runtime
             }
         }
 
-        private static Texture2DArray Expand(Texture2DArray stock, int firstLayer, List<Layer> layers, Func<Layer, Texture2D?> select)
+        private static Texture2DArray Expand(Texture2DArray stock, int firstLayer, List<Layer> layers, Func<Layer, Texture2D?> select, bool recolorDiffuse = false)
         {
             var mipLimit = new MipmapLimitDescriptor(!stock.ignoreMipmapLimit, stock.mipmapLimitGroup);
             var expanded = new Texture2DArray(stock.width, stock.height, firstLayer + layers.Count,
@@ -317,7 +319,10 @@ namespace Sevo.Framework.Runtime
                     for (int mip = 0; mip < stock.mipmapCount; mip++)
                     {
                         var source = texture != null ? texture.GetPixelData<byte>(mip) : stock.GetPixelData<byte>(mip, layer.StockLayer);
-                        source.CopyTo(expanded.GetPixelData<byte>(mip, firstLayer + index));
+                        var destination = expanded.GetPixelData<byte>(mip, firstLayer + index);
+                        source.CopyTo(destination);
+                        if (recolorDiffuse && layer.StockVisualTint is StockTint tint)
+                            RecolorStockDiffuse(destination, tint);
                     }
                 }
                 expanded.Apply(false, false);
@@ -328,6 +333,31 @@ namespace Sevo.Framework.Runtime
                 Object.Destroy(expanded);
                 throw;
             }
+        }
+
+        private static void RecolorStockDiffuse(NativeArray<byte> blocks, StockTint tint)
+        {
+            // BC3 has an independent alpha block and always uses four-color RGB interpolation.
+            // Keep both index streams and change only the two little-endian RGB565 endpoints.
+            if ((blocks.Length & 15) != 0) throw new InvalidOperationException("Invalid BC3 terrain mip size.");
+            for (int i = 0; i < blocks.Length; i += 16)
+            {
+                RecolorEndpoint(blocks, i + 8, tint);
+                RecolorEndpoint(blocks, i + 10, tint);
+            }
+        }
+
+        private static void RecolorEndpoint(NativeArray<byte> blocks, int index, StockTint tint)
+        {
+            int source = blocks[index] | blocks[index + 1] << 8;
+            float luminance = ((source >> 11) * (0.2126f / 31)
+                + ((source >> 5) & 63) * (0.7152f / 63) + (source & 31) * (0.0722f / 31)) * tint.Brightness;
+            int r = Mathf.RoundToInt(Mathf.Clamp01(luminance * (tint.Color.r / 255f)) * 31);
+            int g = Mathf.RoundToInt(Mathf.Clamp01(luminance * (tint.Color.g / 255f)) * 63);
+            int b = Mathf.RoundToInt(Mathf.Clamp01(luminance * (tint.Color.b / 255f)) * 31);
+            int encoded = r << 11 | g << 5 | b;
+            blocks[index] = (byte)encoded;
+            blocks[index + 1] = (byte)(encoded >> 8);
         }
 
         private static void CopyQuality(Texture2DArray stock, Texture2DArray target)
@@ -363,37 +393,55 @@ namespace Sevo.Framework.Runtime
             ReleaseBindings();
         }
 
+        internal readonly struct StockTint
+        {
+            internal readonly string Material;
+            internal readonly Color32 Color;
+            internal readonly float Brightness;
+
+            internal StockTint(string material, Color32 color, float brightness)
+            {
+                Material = material;
+                Color = color;
+                Brightness = brightness;
+            }
+        }
+
         internal sealed class LayerRequest
         {
-            internal LayerRequest(string key, string materialName, Func<TerrainTextureLayers> createLayers, bool isRegisteredMaterial = false)
+            internal LayerRequest(string key, string materialName, Func<TerrainTextureLayers>? createLayers, bool isRegisteredMaterial = false, StockTint? stockTint = null)
             {
                 Key = key;
                 MaterialName = materialName;
                 CreateLayers = createLayers;
                 IsRegisteredMaterial = isRegisteredMaterial;
+                StockVisualTint = stockTint;
             }
 
             internal string Key { get; }
             internal string MaterialName { get; }
-            internal Func<TerrainTextureLayers> CreateLayers { get; }
+            internal Func<TerrainTextureLayers>? CreateLayers { get; }
             internal bool IsRegisteredMaterial { get; }
+            internal StockTint? StockVisualTint { get; }
         }
 
         private sealed class Layer
         {
-            internal Layer(int row, string name, int stockLayer, TerrainTextureLayers textures, string? registeredKey)
+            internal Layer(int row, string name, int stockLayer, TerrainTextureLayers? textures, string? registeredKey, StockTint? stockTint)
             {
                 Row = row;
                 Name = name;
                 StockLayer = stockLayer;
                 Textures = textures;
                 RegisteredKey = registeredKey;
+                StockVisualTint = stockTint;
             }
 
             internal int Row { get; }
             internal string Name { get; }
             internal int StockLayer { get; }
-            internal TerrainTextureLayers Textures { get; }
+            internal TerrainTextureLayers? Textures { get; }
+            internal StockTint? StockVisualTint { get; }
             internal string? RegisteredKey { get; }
             internal int TextureLayer { get; set; }
             internal Color Fade { get; set; }

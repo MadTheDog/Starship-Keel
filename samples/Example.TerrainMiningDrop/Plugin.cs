@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using BepInEx;
 using Common.RNG;
@@ -22,7 +23,9 @@ namespace Sevo.Example.TerrainMiningDrop
         private const string Output = Owner + ":shard";
         private const string Backing = "RAW_IRON_A";
         private const int FixtureNode = 7329;
+        private static readonly string[] RockBackings = { "TEX_ROCK_A", "DIRTY_ROCK_A", "LARGE_ROCK_A" };
         private bool pending;
+        private bool aluminium;
 
         private void Awake()
         {
@@ -45,6 +48,13 @@ namespace Sevo.Example.TerrainMiningDrop
                 TerrainMiningDropRegistration.Register(Owner, "conflict-one", Owner + ":conflict", Output);
                 TerrainMiningDropRegistration.Register("example.other-terrain-mining", "conflict-two", Owner + ":conflict", Output);
                 TerrainMiningDropRegistration.Register(Owner, "missing-item", Owner + ":missing", Owner + ":unregistered");
+                for (int i = 0; i < RockBackings.Length; i++)
+                {
+                    string localName = "rock-" + i;
+                    TerrainMaterialRegistration.Register(Owner, localName, 1, RockBackings[i]);
+                    TerrainMiningDropRegistration.Register(Owner, localName, Owner + ":" + localName, Output, 2f);
+                }
+                aluminium = Environment.GetEnvironmentVariable("SEVO_KEEL_TERRAIN_MINING_ALUMINIUM") == "1";
                 pending = true;
             }
             catch (Exception exception)
@@ -64,7 +74,7 @@ namespace Sevo.Example.TerrainMiningDrop
             int transform = 0;
             try
             {
-                if (!TerrainMiningDropRegistration.IsAvailable || !ItemRegistration.TryGetPrefabId(Output, out int output))
+                if (!TerrainMiningDropRegistration.IsAvailable || !ItemRegistration.TryCreateItemData(Output, 2f, out var output))
                     throw new InvalidOperationException("The terrain mining or item hook is unavailable.");
                 var drop = typeof(OctreeNodeResources).GetMethod("CheckIfDropRock", BindingFlags.Static | BindingFlags.NonPublic)
                     ?? throw new MissingMethodException("OctreeNodeResources.CheckIfDropRock");
@@ -77,11 +87,36 @@ namespace Sevo.Example.TerrainMiningDrop
                     scale = 1f
                 });
                 var node = new OctreeNodeData { size = 16f, transformId = transform };
-                VerifyDrop(drop, node, "replacement", 100, output, expectCustom: false, crossesSurface: false);
-                VerifyDrop(drop, node, "replacement", 200, output, expectCustom: true);
-                VerifyDrop(drop, node, "conflict", 300, output, expectCustom: false);
-                VerifyDrop(drop, node, "missing", 400, output, expectCustom: false);
-                Logger.LogInfo("KEEL_TERRAIN_MINING_PROBE PASS replacement=1 quantity=2 impulse=true conflictStock=1 missingItemStock=1 nonCrossing=0");
+                int rockPrefabCount = (typeof(OctreeNodeResources).GetField("ROCKS", BindingFlags.Static | BindingFlags.NonPublic)
+                    ?.GetValue(null) as WorldPropCommon.WorldPropId[])?.Length
+                    ?? throw new InvalidOperationException("The stock rock prefab table is unavailable.");
+                VerifyDrop(drop, node, Material("replacement"), 100, rockPrefabCount, true, null, crossesSurface: false);
+                VerifyDrop(drop, node, Material("replacement"), 200, rockPrefabCount, true, output);
+                VerifyDrop(drop, node, Material("conflict"), 300, rockPrefabCount, true, null);
+                VerifyDrop(drop, node, Material("missing"), 400, rockPrefabCount, true, null);
+
+                var rows = WorldTerrainResources.TerrainMaterialDatas;
+                byte[] regularRock = Enumerable.Range(0, RockBackings.Length)
+                    .Select(i => Material("rock-" + i)).Where(id => rows[id].spawnRock && !rows[id].IsOre).ToArray();
+                if (regularRock.Length == 0) throw new InvalidOperationException("No stock backing in the probe admits ordinary rock drops.");
+                float rockScale = VerifyDrop(drop, node, regularRock[0], 500, rockPrefabCount, false, output);
+
+                if (aluminium)
+                {
+                    if (!TerrainMaterialRegistration.TryGetId("sevo.aluminium:terrain", out byte al)
+                        || !ItemRegistration.TryCreateItemData("sevo.aluminium:ore", 1f, out var alItem))
+                        throw new InvalidOperationException("The Aluminium fixture is unavailable.");
+                    var assets = Resources.FindObjectsOfTypeAll<WorldTerrainResources>()
+                        .Where(asset => asset.terrainTextures.Count <= rows.Length).ToArray();
+                    int silver = assets.Length == 1 ? assets[0].terrainTextures.FindIndex(row => row.ShaderName == "RAW_SILVER_A") : -1;
+                    if (silver < 0 || silver >= rows.Length)
+                        throw new InvalidOperationException("The stock raw Silver terrain row is unavailable.");
+                    float aluminiumScale = VerifyDrop(drop, node, al, 600, rockPrefabCount, true, alItem, pickup: true);
+                    float silverScale = VerifyDrop(drop, node, (byte)silver, 600, rockPrefabCount, true, null);
+                    if (aluminiumScale != silverScale) throw new InvalidOperationException("Aluminium and Silver native mining scales differ.");
+                    Logger.LogInfo($"KEEL_TERRAIN_MINING_ALUMINIUM PASS aluminiumScale={aluminiumScale:R} silverScale={silverScale:R}");
+                }
+                Logger.LogInfo($"KEEL_TERRAIN_MINING_PROBE PASS replacement=1 quantity=2 impulse=true rockScale={rockScale:R} conflictStock=1 missingItemStock=1 nonCrossing=0");
             }
             catch (Exception exception)
             {
@@ -93,14 +128,16 @@ namespace Sevo.Example.TerrainMiningDrop
             }
         }
 
-        private static void VerifyDrop(MethodInfo drop, OctreeNodeData node, string material, uint candidateSeed,
-            int output, bool expectCustom, bool crossesSurface = true)
+        private static byte Material(string key) =>
+            TerrainMaterialRegistration.TryGetId(Owner + ":" + key, out byte id) ? id
+                : throw new InvalidOperationException("The probe material was not registered: " + key);
+
+        private float VerifyDrop(MethodInfo drop, OctreeNodeData node, byte native, uint candidateSeed,
+            int rockPrefabCount, bool expectOre, ItemInstanceData? expectedItem, bool crossesSurface = true, bool pickup = false)
         {
-            if (!TerrainMaterialRegistration.TryGetId(Owner + ":" + material, out byte native))
-                throw new InvalidOperationException("The probe material was not registered: " + material);
             var materialRow = WorldTerrainResources.TerrainMaterialDatas[native];
-            if (!materialRow.spawnRock || !materialRow.IsRawOre || !materialRow.IsOre)
-                throw new InvalidOperationException("The stock ore backing no longer drops ore.");
+            if (!materialRow.spawnRock || materialRow.IsOre != expectOre || (expectOre && !materialRow.IsRawOre))
+                throw new InvalidOperationException("The selected backing does not use the expected stock drop branch.");
             var index = new int3(10, 10, 10);
             uint indexHash = unchecked((uint)index.GetHashCode());
             while (new SkeetoHash(unchecked(candidateSeed + FixtureNode + indexHash)).GetFloat() > 0.5f
@@ -119,16 +156,51 @@ namespace Sevo.Example.TerrainMiningDrop
                     if (item.id == id && item.seed == seed && item.transformId != 0) spawned.Add(item);
                 }
                 if (spawned.Count != (crossesSurface ? 1 : 0))
-                    throw new InvalidOperationException("Unexpected stock or replacement item count for " + material + ".");
-                if (!crossesSurface) return;
+                    throw new InvalidOperationException("Unexpected stock or replacement item count for " + native + ".");
+                if (!crossesSurface) return 0;
                 var dropItem = spawned[0];
                 if (dropItem.rigidbodyId == 0 || math.lengthsq(SkyRigidbody.datas[dropItem.rigidbodyId].linearVelocity) <= 0f)
                     throw new InvalidOperationException("The drop did not receive its stock impulse.");
-                if (expectCustom && (dropItem.prefabId != output || dropItem.itemType != WorldItemType.craftingParts
-                    || dropItem.quantity != 2f || !dropItem.CanBePickedUp(StorageCommon.CONTEXT)))
-                    throw new InvalidOperationException("The replacement did not use the registered item identity and quantity.");
-                if (!expectCustom && (dropItem.itemType != WorldItemType.ore || dropItem.quantity != 1f))
-                    throw new InvalidOperationException("Stock drop was not preserved for " + material + ".");
+                var random = new SkeetoHash(seed);
+                _ = random.GetIntRange(0, rockPrefabCount - 1);
+                float scale = expectOre ? random.GetFloatRange(0.5f, 0.5f) : random.GetFloatRange(0.45f, 0.55f);
+                var actualTransform = SkyTransformData.datas[dropItem.transformId];
+                if (dropItem.scale != scale || actualTransform.scale != scale || actualTransform.localScale != scale)
+                    throw new InvalidOperationException($"Expected stock scale {scale:R}; item={dropItem.scale:R}, transform={actualTransform.scale:R}/{actualTransform.localScale:R}.");
+                if (expectedItem is ItemInstanceData expected)
+                {
+                    if (dropItem.prefabId != expected.prefabId || dropItem.itemType != expected.itemType
+                        || dropItem.contextualDataId != expected.contextualDataId || dropItem.quantity != expected.quantity
+                        || !dropItem.color.Equals(expected.color) || !dropItem.CanBePickedUp(StorageCommon.CONTEXT))
+                        throw new InvalidOperationException("The replacement did not retain the registered identity, tint and quantity.");
+                }
+                else if (dropItem.itemType != WorldItemType.ore || dropItem.quantity != 1f
+                    || dropItem.contextualDataId != (int)materialRow.GradientTypeOreSpawn)
+                    throw new InvalidOperationException("The native stock drop was not preserved.");
+                var context = StorageCommon.CONTEXT;
+                var render = dropItem.GetRenderBounds(context, true).Size;
+                var collider = dropItem.GetColliderBounds(context, true).Size;
+                if (math.lengthsq(render) <= 0 || math.lengthsq(collider) <= 0
+                    || math.distancesq(render, dropItem.GetRenderBounds(context, false).Size * scale) > 1e-8f
+                    || math.distancesq(collider, dropItem.GetColliderBounds(context, false).Size * scale) > 1e-8f)
+                    throw new InvalidOperationException("Native render or collider bounds did not follow the drop scale.");
+                if (pickup)
+                {
+                    var inventory = Dependency.PlayerManager.PlayerInventory;
+                    float Count() => inventory.GetItemSaveDatas().Where(data => data.id == dropItem.prefabId
+                        && data.itemType == dropItem.itemType && data.contextualDataId == dropItem.contextualDataId)
+                        .Sum(data => data.quantity);
+                    float before = Count();
+                    // The native pickup can merge or move the original ID into the player inventory.
+                    // The disposable fixture must not release that ID after handing it to stock.
+                    spawned.Clear();
+                    dropItem.TryPickUpItem(false);
+                    if (Count() - before != dropItem.quantity)
+                        throw new InvalidOperationException("Native pickup did not retain the ore identity and quantity.");
+                }
+                Logger.LogInfo(
+                    $"KEEL_DROP_BOUNDS type={dropItem.itemType} scale={scale:R} render={render} collider={collider} pickup={pickup}");
+                return scale;
             }
             finally
             {

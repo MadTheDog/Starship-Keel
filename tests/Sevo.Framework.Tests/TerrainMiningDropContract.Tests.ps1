@@ -44,5 +44,21 @@ try {
     $allocate.OpCode = [Mono.Cecil.Cil.OpCodes]::Nop
     Assert-Capability $false 'stock spawn allocation changed'
     $allocate.OpCode = $stockOp
+    $draw = $randomSpawn.Body.Instructions | Where-Object {
+        $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'GetFloatRange'
+    }
+    $scaleStore = $draw.Next
+    $stockOp = $scaleStore.OpCode
+    $scaleStore.OpCode = [Mono.Cecil.Cil.OpCodes]::Nop
+    Assert-Capability $false 'native spawn no longer stores the seeded scale before registration'
+    $scaleStore.OpCode = $stockOp
+
+    $prefabDraw = $randomSpawn.Body.Instructions | Where-Object {
+        $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'GetIntRange'
+    }
+    $stockOp = $prefabDraw.OpCode
+    $prefabDraw.OpCode = [Mono.Cecil.Cil.OpCodes]::Nop
+    Assert-Capability $false 'native scale no longer follows the stock prefab RNG draw'
+    $prefabDraw.OpCode = $stockOp
     Assert-Capability $true 'restored stock mining contracts'
 } finally { $assembly.Dispose() }

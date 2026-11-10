@@ -16,6 +16,10 @@ namespace Sevo.Framework.Runtime
         public string DisplayName { get; }
         public string Description { get; }
         public ItemVisualDefinition? Visual { get; }
+        public WorldItemType Category { get; }
+        public string? MaterialKey { get; }
+        public string? MaterialSymbol { get; }
+        public Color32 Tint { get; }
 
         public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description)
             : this(stockTemplate, displayName, description, null)
@@ -24,6 +28,33 @@ namespace Sevo.Framework.Runtime
 
         public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description,
             ItemVisualDefinition? visual)
+            : this(stockTemplate, displayName, description, visual, WorldItemType.craftingParts, null, default)
+        {
+        }
+
+        public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description,
+            WorldItemType category, string materialKey, Color32 tint)
+            : this(stockTemplate, displayName, description, category, materialKey, tint, null)
+        {
+        }
+
+        /// <summary>Creates a contextual item with an optional compact symbol for native inventory slots.</summary>
+        public ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description,
+            WorldItemType category, string materialKey, Color32 tint, string? materialSymbol)
+            : this(stockTemplate, displayName, description, null, category, materialKey, tint)
+        {
+            if (category is not (WorldItemType.ore or WorldItemType.ingot))
+                throw new ArgumentOutOfRangeException(nameof(category));
+            ContentAllocator.ValidateKey(materialKey);
+            if (materialSymbol != null && (materialSymbol.Length is < 1 or > 4
+                || materialSymbol.Any(character => character is not (>= 'a' and <= 'z'
+                    or >= 'A' and <= 'Z' or >= '0' and <= '9'))))
+                throw new ArgumentException("Use 1 to 4 ASCII letters or digits for the material symbol.", nameof(materialSymbol));
+            MaterialSymbol = materialSymbol;
+        }
+
+        private ItemDefinition(WorldPropCommon.WorldPropId stockTemplate, string displayName, string description,
+            ItemVisualDefinition? visual, WorldItemType category, string? materialKey, Color32 tint)
         {
             if ((int)stockTemplate <= 0 || !Enum.IsDefined(typeof(WorldPropCommon.WorldPropId), stockTemplate))
                 throw new ArgumentOutOfRangeException(nameof(stockTemplate));
@@ -36,6 +67,9 @@ namespace Sevo.Framework.Runtime
             DisplayName = displayName;
             Description = description;
             Visual = visual;
+            Category = category;
+            MaterialKey = materialKey;
+            Tint = new Color32(tint.r, tint.g, tint.b, 255);
         }
     }
 
@@ -117,8 +151,7 @@ namespace Sevo.Framework.Runtime
             element = default;
             if (quantity <= 0f || !ItemInstanceCommon.IsValidStackQuantity(quantity) || !TryGetPrefabId(key, out var prefabId))
                 return false;
-            element = new CraftingElement(WorldItemType.craftingParts, prefabId, quantity);
-            return true;
+            return ItemResources.TryCreateElement(prefabId, quantity, out element);
         }
 
         /// <summary>Returns an unregistered native item value. Apply it through an appropriate game-thread stock operation.</summary>
@@ -130,6 +163,11 @@ namespace Sevo.Framework.Runtime
             return true;
         }
 
+        internal static string[] GetPublishedKeys()
+        {
+            lock (Gate)
+                return published?.Keys.OrderBy(key => key, StringComparer.Ordinal).ToArray() ?? Array.Empty<string>();
+        }
         internal static ItemDeclaration[] Seal()
         {
             lock (Gate)
